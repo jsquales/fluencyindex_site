@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+
+{% block content %}
+<section class="hero">
+  <div class="hero-text">
+    <h1>Thank you for joining the waitlist{{ name and (", " ~ name) or "" }}.</h1>
+    <p class="hero-subtitle">
+      We’ve received your request for early access to Fluency Index.
+      As we open new pilots, we’ll reach out with next steps and timelines.
+    </p>
+  </div>
+</section>
+
+<section class="auth-section">
+  <div class="auth-card">
+    <h2>What happens next?</h2>
+    <ul class="next-steps">
+      <li>We’ll review your information and match you with upcoming pilot opportunities.</li>
+      <li>Districts and schools may be prioritized based on readiness and fit.</li>
+      <li>You’ll receive an email from us when we’re ready to onboard new partners.</li>
+    </ul>
+
+    <p class="helper-text">
+      In the meantime, you can revisit the
+      <a href="/">Fluency Index overview page</a>
+      or share the site with colleagues.
+    </p>
+  </div>
+</section>
+{% endblock %}

@@ -6,36 +6,41 @@
     <h1>Request Early Access</h1>
     <p class="hero-subtitle">
       Fluency Index is in active development. If you’re interested in piloting with a school,
-      district, or class, this is where your invite flow will live.
+      district, or class, join the waitlist below and we’ll reach out as we open new pilots.
     </p>
   </div>
 </section>
 
 <section class="auth-section">
   <div class="auth-card">
-    <h2>Tell us who you are</h2>
+    <h2>Join the Pilot Waitlist</h2>
     <p class="auth-intro">
-      This form is a placeholder. Later, it might send your info to a waitlist or pilot program list.
+      Tell us a bit about you and how you’d like to use Fluency Index.
     </p>
 
-    <form class="auth-form">
+    <form class="auth-form" method="post" action="/signup">
       <label class="auth-field">
         <span>Name</span>
-        <input type="text" placeholder="Full name" disabled>
+        <input type="text" name="name" placeholder="Full name" required>
       </label>
 
       <label class="auth-field">
         <span>Role</span>
-        <input type="text" placeholder="District leader, teacher, parent..." disabled>
+        <input type="text" name="role" placeholder="District leader, teacher, parent..." required>
       </label>
 
       <label class="auth-field">
         <span>Email</span>
-        <input type="email" placeholder="you@district.org" disabled>
+        <input type="email" name="email" placeholder="you@district.org" required>
       </label>
 
-      <button type="button" class="btn-primary" disabled>
-        Request Early Access (Coming Soon)
+      <label class="auth-field">
+        <span>Notes (optional)</span>
+        <textarea name="notes" rows="3" placeholder="Tell us about your school, grade levels, or goals."></textarea>
+      </label>
+
+      <button type="submit" class="btn-primary">
+        Request Early Access
       </button>
     </form>
 

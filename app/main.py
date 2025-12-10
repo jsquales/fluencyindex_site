@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, Form
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -33,11 +33,38 @@ async def login(request: Request):
 
 
 @app.get("/signup", response_class=HTMLResponse)
-async def signup(request: Request):
+async def signup_get(request: Request):
+    # Show the waitlist form
     return templates.TemplateResponse(
         "signup.html",
         {
             "request": request,
             "page_title": "Get Early Access | Fluency Index"
+        }
+    )
+
+
+@app.post("/signup", response_class=HTMLResponse)
+async def signup_post(
+    request: Request,
+    name: str = Form(...),
+    role: str = Form(...),
+    email: str = Form(...),
+    notes: str = Form(""),
+):
+    """
+    Handle the Join the Pilot Waitlist form submission.
+
+    For now, we just log it; later we can store in a DB or send an email.
+    """
+    # This will show up in Render logs:
+    print("New waitlist signup:", {"name": name, "role": role, "email": email, "notes": notes})
+
+    return templates.TemplateResponse(
+        "signup_thanks.html",
+        {
+            "request": request,
+            "page_title": "Thanks for Joining the Waitlist | Fluency Index",
+            "name": name,
         }
     )
