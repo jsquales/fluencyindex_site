@@ -5,12 +5,20 @@ from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
+from .db import SessionLocal, WaitlistEntry, init_db  # NEW
+
 BASE_DIR = Path(__file__).resolve().parent  # app/
 
 app = FastAPI()
 
 app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
 templates = Jinja2Templates(directory=BASE_DIR / "templates")
+
+
+@app.on_event("startup")
+def on_startup() -> None:
+    """Initialize the database (create tables if needed)."""
+    init_db()
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -55,10 +63,26 @@ async def signup_post(
     """
     Handle the Join the Pilot Waitlist form submission.
 
-    For now, we just log it; later we can store in a DB or send an email.
+    For now, we save it to the waitlist_entries table and log it.
     """
-    # This will show up in Render logs:
     print("New waitlist signup:", {"name": name, "role": role, "email": email, "notes": notes})
+
+    # Save to the database
+    session = SessionLocal()
+    try:
+        entry = WaitlistEntry(
+            name=name,
+            role=role,
+            email=email,
+            notes=notes if notes.strip() else None,
+        )
+        session.add(entry)
+        session.commit()
+    except Exception as e:
+        session.rollback()
+        print("Error saving waitlist signup:", e)
+    finally:
+        session.close()
 
     return templates.TemplateResponse(
         "signup_thanks.html",
