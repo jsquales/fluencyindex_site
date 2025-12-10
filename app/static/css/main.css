@@ -1,0 +1,223 @@
+/* app/static/css/main.css */
+
+:root {
+  --bg: #f5f7fb;
+  --card: #ffffff;
+  --primary: #2563eb;
+  --primary-dark: #1d4ed8;
+  --accent: #10b981;
+  --text-main: #111827;
+  --text-muted: #6b7280;
+  --border: #e5e7eb;
+  --shadow-soft: 0 8px 24px rgba(15, 23, 42, 0.08);
+  --radius-lg: 16px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  background: var(--bg);
+  color: var(--text-main);
+}
+
+/* Header */
+
+.site-header {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.75rem 2rem;
+  background: rgba(248, 250, 252, 0.9);
+  backdrop-filter: blur(10px);
+  border-bottom: 1px solid var(--border);
+}
+
+.logo {
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  font-size: 0.95rem;
+  color: var(--primary-dark);
+}
+
+.nav-links {
+  display: flex;
+  gap: 1rem;
+  align-items: center;
+  font-size: 0.95rem;
+}
+
+.nav-links a {
+  text-decoration: none;
+  color: var(--text-main);
+}
+
+.nav-links a:hover {
+  color: var(--primary);
+}
+
+/* Layout */
+
+.page {
+  max-width: 1100px;
+  margin: 1.5rem auto 3rem;
+  padding: 0 1.5rem;
+}
+
+/* Hero */
+
+.hero {
+  background: radial-gradient(circle at top left, #e0f2fe 0, #eff6ff 45%, #f5f7fb 100%);
+  border-radius: var(--radius-lg);
+  padding: 2rem 2.25rem;
+  box-shadow: var(--shadow-soft);
+  margin-bottom: 1.75rem;
+}
+
+.hero-text h1 {
+  margin: 0 0 0.75rem;
+  font-size: 1.9rem;
+}
+
+.hero-subtitle {
+  margin: 0 0 1.25rem;
+  color: var(--text-muted);
+  max-width: 650px;
+}
+
+.hero-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin-bottom: 0.75rem;
+}
+
+.hero-note {
+  font-size: 0.9rem;
+  color: var(--text-muted);
+}
+
+/* Buttons */
+
+.btn-primary,
+.btn-secondary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.55rem 1.1rem;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  font-weight: 600;
+  font-size: 0.95rem;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.btn-primary {
+  background: var(--primary);
+  color: #ffffff !important;
+  border-color: var(--primary);
+}
+
+.btn-primary:hover {
+  background: var(--primary-dark);
+  border-color: var(--primary-dark);
+}
+
+.btn-secondary {
+  background: #eef2ff;
+  color: var(--primary-dark);
+  border-color: #e0e7ff;
+}
+
+.btn-secondary:hover {
+  background: #e0e7ff;
+}
+
+/* Pillars section */
+
+.pillars {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+}
+
+.pillar {
+  background: var(--card);
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--border);
+  padding: 1.2rem 1.3rem;
+  box-shadow: 0 3px 10px rgba(15, 23, 42, 0.04);
+}
+
+.pillar h2 {
+  margin-top: 0;
+  margin-bottom: 0.4rem;
+  font-size: 1.05rem;
+}
+
+.pillar p {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 0.95rem;
+}
+
+/* How it works */
+
+.how-it-works h2 {
+  margin-bottom: 0.4rem;
+}
+
+.how-it-works ol {
+  padding-left: 1.2rem;
+  color: var(--text-muted);
+  font-size: 0.95rem;
+}
+
+.how-it-works li {
+  margin-bottom: 0.3rem;
+}
+
+.coming-soon {
+  margin-top: 0.7rem;
+  font-size: 0.9rem;
+  color: var(--accent);
+}
+
+/* Footer */
+
+.site-footer {
+  max-width: 1100px;
+  margin: 0 auto 1.5rem;
+  padding: 0.75rem 1.5rem 0;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  text-align: left;
+  border-top: 1px solid #e5e7eb;
+}
+
+/* Responsiveness */
+
+@media (max-width: 700px) {
+  .site-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.4rem;
+  }
+
+  .hero {
+    padding: 1.4rem 1.5rem;
+  }
+
+  .hero-text h1 {
+    font-size: 1.5rem;
+  }
+}

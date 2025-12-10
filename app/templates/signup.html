@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+
+{% block content %}
+<section class="hero">
+  <div class="hero-text">
+    <h1>Request Early Access</h1>
+    <p class="hero-subtitle">
+      Fluency Index is in active development. If you’re interested in piloting with a school,
+      district, or class, this is where your invite flow will live.
+    </p>
+  </div>
+</section>
+
+<section class="auth-section">
+  <div class="auth-card">
+    <h2>Tell us who you are</h2>
+    <p class="auth-intro">
+      This form is a placeholder. Later, it might send your info to a waitlist or pilot program list.
+    </p>
+
+    <form class="auth-form">
+      <label class="auth-field">
+        <span>Name</span>
+        <input type="text" placeholder="Full name" disabled>
+      </label>
+
+      <label class="auth-field">
+        <span>Role</span>
+        <input type="text" placeholder="District leader, teacher, parent..." disabled>
+      </label>
+
+      <label class="auth-field">
+        <span>Email</span>
+        <input type="email" placeholder="you@district.org" disabled>
+      </label>
+
+      <button type="button" class="btn-primary" disabled>
+        Request Early Access (Coming Soon)
+      </button>
+    </form>
+
+    <p class="helper-text">
+      Already part of a pilot?
+      <a href="/login">Sign in here</a>.
+    </p>
+  </div>
+</section>
+{% endblock %}

@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <title>Fluency Index</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+
+  <!-- Simple professional, district-style vibes -->
+  <link rel="stylesheet" href="/static/css/main.css">
+</head>
+<body>
+  <header class="site-header">
+    <div class="logo">Fluency Index</div>
+    <nav class="nav-links">
+      <a href="/">Home</a>
+      <a href="/auth/login">Sign In</a>
+      <a href="/auth/signup" class="btn-primary">Get Early Access</a>
+    </nav>
+  </header>
+
+  <main class="page">
+    {% block content %}{% endblock %}
+  </main>
+
+  <footer class="site-footer">
+    <div>© {{ year if year is defined else "2025" }} Fluency Index. All rights reserved.</div>
+  </footer>
+</body>
+</html>
