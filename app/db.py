@@ -23,6 +23,13 @@ if not DATABASE_URL:
     # Fallback for local development: use a SQLite file
     print("DATABASE_URL not set; using local SQLite database 'dev.db'")
     DATABASE_URL = "sqlite:///dev.db"
+else:
+    # On Render, ensure we use the psycopg (v3) driver instead of default psycopg2
+    if DATABASE_URL.startswith("postgres://"):
+        DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql+psycopg://", 1)
+    elif DATABASE_URL.startswith("postgresql://"):
+        DATABASE_URL = DATABASE_URL.replace("postgresql://", "postgresql+psycopg://", 1)
+
 
 # Create the SQLAlchemy engine and session factory
 engine = create_engine(
