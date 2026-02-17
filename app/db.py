@@ -15,6 +15,7 @@ from sqlalchemy import (
     UniqueConstraint,
     create_engine,
     func,
+    text,
 )
 from sqlalchemy.orm import (
     Mapped,
@@ -226,3 +227,54 @@ def init_db() -> None:
     _ = (WaitlistEntry, User, Class, Student, Session, Attempt)
     with engine.begin() as connection:
         Base.metadata.create_all(bind=connection, checkfirst=True)
+        if connection.dialect.name == "postgresql":
+            connection.execute(
+                text(
+                    """
+                    CREATE TABLE IF NOT EXISTS mr_sessions (
+                        id SERIAL PRIMARY KEY,
+                        device_id VARCHAR(64) NOT NULL,
+                        client_session_id INTEGER NOT NULL,
+                        mode VARCHAR(16),
+                        difficulty VARCHAR(32),
+                        duration_s INTEGER NULL,
+                        count_target INTEGER NULL,
+                        started_at_ms BIGINT NULL,
+                        ended_at_ms BIGINT NULL,
+                        attempted INTEGER NULL,
+                        correct INTEGER NULL,
+                        avg_ms INTEGER NULL,
+                        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                        UNIQUE (device_id, client_session_id)
+                    );
+                    """
+                )
+            )
+            connection.execute(
+                text(
+                    """
+                    CREATE TABLE IF NOT EXISTS mr_question_events (
+                        id SERIAL PRIMARY KEY,
+                        device_id VARCHAR(64) NOT NULL,
+                        client_session_id INTEGER NOT NULL,
+                        a INTEGER,
+                        b INTEGER,
+                        user_answer INTEGER,
+                        correct BOOLEAN,
+                        elapsed_ms INTEGER,
+                        timestamp_ms BIGINT,
+                        client_attempt_id VARCHAR(64) NULL,
+                        created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+                    );
+                    """
+                )
+            )
+            connection.execute(
+                text(
+                    """
+                    CREATE UNIQUE INDEX IF NOT EXISTS uq_mr_question_events_device_attempt_id
+                    ON mr_question_events (device_id, client_attempt_id)
+                    WHERE client_attempt_id IS NOT NULL;
+                    """
+                )
+            )

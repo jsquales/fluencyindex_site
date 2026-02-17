@@ -31,6 +31,37 @@ class AttemptIn(BaseModel):
     score: Optional[float] = None
 
 
+class MRSessionStartIn(BaseModel):
+    device_id: str
+    client_session_id: int
+    mode: Optional[str] = None
+    difficulty: Optional[str] = None
+    count_target: Optional[int] = None
+    started_at_ms: Optional[int] = None
+
+
+class MRSessionEndIn(BaseModel):
+    device_id: str
+    client_session_id: int
+    ended_at_ms: Optional[int] = None
+    attempted: Optional[int] = None
+    correct: Optional[int] = None
+    avg_ms: Optional[int] = None
+    duration_s: Optional[int] = None
+
+
+class MRQuestionIn(BaseModel):
+    device_id: str
+    client_session_id: int
+    a: Optional[int] = None
+    b: Optional[int] = None
+    user_answer: Optional[int] = None
+    correct: Optional[bool] = None
+    elapsed_ms: Optional[int] = None
+    timestamp_ms: Optional[int] = None
+    client_attempt_id: Optional[str] = None
+
+
 @app.on_event("startup")
 def on_startup() -> None:
     """Initialize the database (create tables if needed)."""
@@ -163,6 +194,129 @@ async def create_attempt(payload: AttemptIn):
         ).first()
         db.commit()
         return {"status": "ok", "attempt_id": inserted.id}
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+
+@app.post("/api/v1/mr/session/start")
+async def mr_session_start(payload: MRSessionStartIn):
+    db = SessionLocal()
+    try:
+        db.execute(
+            text(
+                """
+                INSERT INTO mr_sessions (
+                    device_id, client_session_id, mode, difficulty, count_target, started_at_ms
+                )
+                VALUES (
+                    :device_id, :client_session_id, :mode, :difficulty, :count_target, :started_at_ms
+                )
+                ON CONFLICT (device_id, client_session_id)
+                DO UPDATE SET
+                    mode = COALESCE(EXCLUDED.mode, mr_sessions.mode),
+                    difficulty = COALESCE(EXCLUDED.difficulty, mr_sessions.difficulty),
+                    count_target = COALESCE(EXCLUDED.count_target, mr_sessions.count_target),
+                    started_at_ms = COALESCE(EXCLUDED.started_at_ms, mr_sessions.started_at_ms)
+                """
+            ),
+            payload.model_dump(),
+        )
+        db.commit()
+        return {"status": "ok"}
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+
+@app.post("/api/v1/mr/session/end")
+async def mr_session_end(payload: MRSessionEndIn):
+    db = SessionLocal()
+    try:
+        db.execute(
+            text(
+                """
+                UPDATE mr_sessions
+                SET
+                    ended_at_ms = :ended_at_ms,
+                    attempted = :attempted,
+                    correct = :correct,
+                    avg_ms = :avg_ms,
+                    duration_s = :duration_s
+                WHERE device_id = :device_id
+                  AND client_session_id = :client_session_id
+                """
+            ),
+            payload.model_dump(),
+        )
+        db.commit()
+        return {"status": "ok"}
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+
+@app.post("/api/v1/mr/question")
+async def mr_question(payload: MRQuestionIn):
+    db = SessionLocal()
+    try:
+        if payload.client_attempt_id:
+            existing = db.execute(
+                text(
+                    """
+                    SELECT id
+                    FROM mr_question_events
+                    WHERE device_id = :device_id
+                      AND client_attempt_id = :client_attempt_id
+                    LIMIT 1
+                    """
+                ),
+                {
+                    "device_id": payload.device_id,
+                    "client_attempt_id": payload.client_attempt_id,
+                },
+            ).first()
+            if existing:
+                return {"status": "duplicate"}
+
+        inserted = db.execute(
+            text(
+                """
+                INSERT INTO mr_question_events (
+                    device_id,
+                    client_session_id,
+                    a,
+                    b,
+                    user_answer,
+                    correct,
+                    elapsed_ms,
+                    timestamp_ms,
+                    client_attempt_id
+                )
+                VALUES (
+                    :device_id,
+                    :client_session_id,
+                    :a,
+                    :b,
+                    :user_answer,
+                    :correct,
+                    :elapsed_ms,
+                    :timestamp_ms,
+                    :client_attempt_id
+                )
+                RETURNING id
+                """
+            ),
+            payload.model_dump(),
+        ).first()
+        db.commit()
+        return {"status": "ok", "id": inserted.id}
     except Exception:
         db.rollback()
         raise
