@@ -16,6 +16,7 @@ from sqlalchemy import (
     UniqueConstraint,
     create_engine,
     func,
+    text,
 )
 from sqlalchemy.orm import (
     Mapped,
@@ -230,5 +231,7 @@ def init_db() -> None:
     """Create all tables if they don't exist yet."""
     _ = (WaitlistEntry, User, Class, Student, Session, Attempt)
     with engine.begin() as connection:
+        if connection.dialect.name == "postgresql":
+            connection.execute(text("DROP TYPE IF EXISTS session_status CASCADE;"))
+            connection.execute(text("DROP TYPE IF EXISTS user_role CASCADE;"))
         Base.metadata.create_all(bind=connection, checkfirst=True)
-
