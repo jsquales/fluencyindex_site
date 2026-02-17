@@ -6,7 +6,6 @@ from typing import List
 from sqlalchemy import (
     Boolean,
     DateTime,
-    Enum,
     Float,
     ForeignKey,
     Integer,
@@ -16,7 +15,6 @@ from sqlalchemy import (
     UniqueConstraint,
     create_engine,
     func,
-    text,
 )
 from sqlalchemy.orm import (
     Mapped,
@@ -103,7 +101,7 @@ class User(Base):
     full_name: Mapped[str] = mapped_column(String(255), nullable=False)
     email: Mapped[str] = mapped_column(String(255), nullable=False, unique=True, index=True)
     password_hash: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    role: Mapped[UserRole] = mapped_column(Enum(UserRole, name="user_role"), nullable=False)
+    role: Mapped[str] = mapped_column(String(32), nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="true")
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
@@ -182,11 +180,7 @@ class Session(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
     class_id: Mapped[int] = mapped_column(ForeignKey("classes.id", ondelete="CASCADE"), index=True)
     teacher_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"), index=True)
-    status: Mapped[SessionStatus] = mapped_column(
-        Enum(SessionStatus, name="session_status"),
-        nullable=False,
-        server_default=SessionStatus.SCHEDULED.value,
-    )
+    status: Mapped[str] = mapped_column(String(32), nullable=False, server_default="scheduled")
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
@@ -231,7 +225,4 @@ def init_db() -> None:
     """Create all tables if they don't exist yet."""
     _ = (WaitlistEntry, User, Class, Student, Session, Attempt)
     with engine.begin() as connection:
-        if connection.dialect.name == "postgresql":
-            connection.execute(text("DROP TYPE IF EXISTS session_status CASCADE;"))
-            connection.execute(text("DROP TYPE IF EXISTS user_role CASCADE;"))
         Base.metadata.create_all(bind=connection, checkfirst=True)
