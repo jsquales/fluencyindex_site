@@ -1,7 +1,7 @@
 from pathlib import Path
 from typing import Optional
 
-from fastapi import FastAPI, Request, Form
+from fastapi import FastAPI, Request, Form, Query
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -320,5 +320,46 @@ async def mr_question(payload: MRQuestionIn):
     except Exception:
         db.rollback()
         raise
+    finally:
+        db.close()
+
+
+@app.get("/api/v1/mr/sessions/recent")
+async def mr_sessions_recent(
+    device_id: Optional[str] = None,
+    limit: int = Query(default=50, ge=1, le=200),
+):
+    db = SessionLocal()
+    try:
+        sql = """
+        SELECT
+          s.device_id,
+          s.client_session_id,
+          s.mode,
+          s.difficulty,
+          s.started_at_ms,
+          s.ended_at_ms,
+          s.attempted,
+          s.correct,
+          s.avg_ms,
+          COUNT(q.id) AS events_logged
+        FROM mr_sessions s
+        LEFT JOIN mr_question_events q
+          ON q.device_id = s.device_id
+         AND q.client_session_id = s.client_session_id
+        """
+        params = {"limit": limit}
+        if device_id:
+            sql += "\nWHERE s.device_id = :device_id\n"
+            params["device_id"] = device_id
+        sql += """
+        GROUP BY
+          s.device_id, s.client_session_id, s.mode, s.difficulty,
+          s.started_at_ms, s.ended_at_ms, s.attempted, s.correct, s.avg_ms
+        ORDER BY s.started_at_ms DESC
+        LIMIT :limit;
+        """
+        rows = db.execute(text(sql), params).fetchall()
+        return [dict(row._mapping) for row in rows]
     finally:
         db.close()
