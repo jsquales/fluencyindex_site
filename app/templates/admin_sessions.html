@@ -12,6 +12,7 @@
           <tr>
             <th style="text-align:left; padding:0.55rem; border-bottom:1px solid var(--border);">Device ID</th>
             <th style="text-align:left; padding:0.55rem; border-bottom:1px solid var(--border);">Session</th>
+            <th style="text-align:left; padding:0.55rem; border-bottom:1px solid var(--border);">View</th>
             <th style="text-align:left; padding:0.55rem; border-bottom:1px solid var(--border);">Mode</th>
             <th style="text-align:left; padding:0.55rem; border-bottom:1px solid var(--border);">Difficulty</th>
             <th style="text-align:left; padding:0.55rem; border-bottom:1px solid var(--border);">Attempted</th>
@@ -22,7 +23,7 @@
         </thead>
         <tbody id="sessions-body">
           <tr>
-            <td colspan="8" style="padding:0.8rem; color:var(--text-muted);">Loading...</td>
+            <td colspan="9" style="padding:0.8rem; color:var(--text-muted);">Loading...</td>
           </tr>
         </tbody>
       </table>
@@ -44,6 +45,11 @@
     return v === null || v === undefined ? "-" : String(v);
   }
 
+  function sessionLink(deviceId, clientSessionId) {
+    const encodedDevice = encodeURIComponent(String(deviceId));
+    return `/admin/sessions/${encodedDevice}/${clientSessionId}`;
+  }
+
   async function loadSessions() {
     try {
       const res = await fetch("/api/v1/mr/sessions/recent?limit=50");
@@ -52,7 +58,7 @@
       }
       const rows = await res.json();
       if (!Array.isArray(rows) || rows.length === 0) {
-        bodyEl.innerHTML = '<tr><td colspan="8" style="padding:0.8rem; color:var(--text-muted);">No sessions found.</td></tr>';
+        bodyEl.innerHTML = '<tr><td colspan="9" style="padding:0.8rem; color:var(--text-muted);">No sessions found.</td></tr>';
         return;
       }
 
@@ -60,6 +66,7 @@
         <tr>
           <td style="padding:0.55rem; border-bottom:1px solid var(--border);">${val(r.device_id)}</td>
           <td style="padding:0.55rem; border-bottom:1px solid var(--border);">${val(r.client_session_id)}</td>
+          <td style="padding:0.55rem; border-bottom:1px solid var(--border);"><a href="${sessionLink(r.device_id, r.client_session_id)}">View</a></td>
           <td style="padding:0.55rem; border-bottom:1px solid var(--border);">${val(r.mode)}</td>
           <td style="padding:0.55rem; border-bottom:1px solid var(--border);">${val(r.difficulty)}</td>
           <td style="padding:0.55rem; border-bottom:1px solid var(--border);">${val(r.attempted)}</td>
@@ -69,7 +76,7 @@
         </tr>
       `).join("");
     } catch (err) {
-      bodyEl.innerHTML = '<tr><td colspan="8" style="padding:0.8rem; color:#b91c1c;">Failed to load sessions.</td></tr>';
+      bodyEl.innerHTML = '<tr><td colspan="9" style="padding:0.8rem; color:#b91c1c;">Failed to load sessions.</td></tr>';
       console.error(err);
     }
   }

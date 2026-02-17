@@ -110,6 +110,19 @@ async def admin_sessions(request: Request):
     )
 
 
+@app.get("/admin/sessions/{device_id}/{client_session_id}", response_class=HTMLResponse)
+async def admin_session_detail(request: Request, device_id: str, client_session_id: int):
+    return templates.TemplateResponse(
+        "admin_session_detail.html",
+        {
+            "request": request,
+            "page_title": "Math Rush Session Detail",
+            "device_id": device_id,
+            "client_session_id": client_session_id,
+        }
+    )
+
+
 @app.post("/signup", response_class=HTMLResponse)
 async def signup_post(
     request: Request,
@@ -371,6 +384,46 @@ async def mr_sessions_recent(
         LIMIT :limit;
         """
         rows = db.execute(text(sql), params).fetchall()
+        return [dict(row._mapping) for row in rows]
+    finally:
+        db.close()
+
+
+@app.get("/api/v1/mr/session/events")
+async def mr_session_events(
+    device_id: str,
+    client_session_id: int,
+    limit: int = Query(default=200, ge=1, le=200),
+):
+    db = SessionLocal()
+    try:
+        rows = db.execute(
+            text(
+                """
+                SELECT
+                  id,
+                  device_id,
+                  client_session_id,
+                  a,
+                  b,
+                  user_answer,
+                  correct,
+                  elapsed_ms,
+                  timestamp_ms,
+                  client_attempt_id
+                FROM mr_question_events
+                WHERE device_id = :device_id
+                  AND client_session_id = :client_session_id
+                ORDER BY timestamp_ms ASC NULLS LAST, id ASC
+                LIMIT :limit;
+                """
+            ),
+            {
+                "device_id": device_id,
+                "client_session_id": client_session_id,
+                "limit": limit,
+            },
+        ).fetchall()
         return [dict(row._mapping) for row in rows]
     finally:
         db.close()

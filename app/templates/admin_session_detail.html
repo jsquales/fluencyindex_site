@@ -1,0 +1,123 @@
+{% extends "base.html" %}
+
+{% block content %}
+<section class="auth-section">
+  <div class="auth-card">
+    <h1>Math Rush Session Detail</h1>
+    <p class="auth-intro">
+      Device: <strong id="device-id-text"></strong>
+      | Session: <strong id="session-id-text"></strong>
+    </p>
+
+    <div id="summary" class="helper-text" style="margin-bottom:1rem;">Loading summary...</div>
+
+    <div style="overflow-x:auto;">
+      <table style="width:100%; border-collapse:collapse; font-size:0.92rem;">
+        <thead>
+          <tr>
+            <th style="text-align:left; padding:0.55rem; border-bottom:1px solid var(--border);">Problem</th>
+            <th style="text-align:left; padding:0.55rem; border-bottom:1px solid var(--border);">Answer</th>
+            <th style="text-align:left; padding:0.55rem; border-bottom:1px solid var(--border);">Correct</th>
+            <th style="text-align:left; padding:0.55rem; border-bottom:1px solid var(--border);">Elapsed ms</th>
+            <th style="text-align:left; padding:0.55rem; border-bottom:1px solid var(--border);">Time</th>
+          </tr>
+        </thead>
+        <tbody id="events-body">
+          <tr>
+            <td colspan="5" style="padding:0.8rem; color:var(--text-muted);">Loading...</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<script>
+  const deviceId = {{ device_id | tojson }};
+  const clientSessionId = {{ client_session_id | tojson }};
+
+  const deviceIdText = document.getElementById("device-id-text");
+  const sessionIdText = document.getElementById("session-id-text");
+  const summaryEl = document.getElementById("summary");
+  const eventsBody = document.getElementById("events-body");
+
+  deviceIdText.textContent = String(deviceId);
+  sessionIdText.textContent = String(clientSessionId);
+
+  function val(v) {
+    return v === null || v === undefined ? "-" : String(v);
+  }
+
+  function fmtTime(ms) {
+    if (ms === null || ms === undefined) return "-";
+    const num = Number(ms);
+    if (!Number.isFinite(num) || num <= 0) return "-";
+    return new Date(num).toLocaleString();
+  }
+
+  async function loadSummary() {
+    const url = `/api/v1/mr/sessions/recent?device_id=${encodeURIComponent(deviceId)}&limit=200`;
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`Summary HTTP ${res.status}`);
+    const rows = await res.json();
+    const match = Array.isArray(rows)
+      ? rows.find((r) => Number(r.client_session_id) === Number(clientSessionId))
+      : null;
+    if (!match) {
+      summaryEl.textContent = "Session summary not found.";
+      return;
+    }
+    summaryEl.innerHTML =
+      `Mode: <strong>${val(match.mode)}</strong> | ` +
+      `Difficulty: <strong>${val(match.difficulty)}</strong> | ` +
+      `Attempted: <strong>${val(match.attempted)}</strong> | ` +
+      `Correct: <strong>${val(match.correct)}</strong> | ` +
+      `Avg ms: <strong>${val(match.avg_ms)}</strong> | ` +
+      `Started: <strong>${fmtTime(match.started_at_ms)}</strong> | ` +
+      `Ended: <strong>${fmtTime(match.ended_at_ms)}</strong> | ` +
+      `Events logged: <strong>${val(match.events_logged)}</strong>`;
+  }
+
+  async function loadEvents() {
+    const url =
+      `/api/v1/mr/session/events?device_id=${encodeURIComponent(deviceId)}` +
+      `&client_session_id=${encodeURIComponent(clientSessionId)}&limit=200`;
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`Events HTTP ${res.status}`);
+    const rows = await res.json();
+    if (!Array.isArray(rows) || rows.length === 0) {
+      eventsBody.innerHTML =
+        '<tr><td colspan="5" style="padding:0.8rem; color:var(--text-muted);">No events found.</td></tr>';
+      return;
+    }
+
+    eventsBody.innerHTML = rows.map((r) => {
+      const problem = `${val(r.a)} x ${val(r.b)}`;
+      const correct = r.correct === true ? "Yes" : (r.correct === false ? "No" : "-");
+      return `
+        <tr>
+          <td style="padding:0.55rem; border-bottom:1px solid var(--border);">${problem}</td>
+          <td style="padding:0.55rem; border-bottom:1px solid var(--border);">${val(r.user_answer)}</td>
+          <td style="padding:0.55rem; border-bottom:1px solid var(--border);">${correct}</td>
+          <td style="padding:0.55rem; border-bottom:1px solid var(--border);">${val(r.elapsed_ms)}</td>
+          <td style="padding:0.55rem; border-bottom:1px solid var(--border);">${fmtTime(r.timestamp_ms)}</td>
+        </tr>
+      `;
+    }).join("");
+  }
+
+  async function loadPage() {
+    try {
+      await loadSummary();
+      await loadEvents();
+    } catch (err) {
+      summaryEl.textContent = "Failed to load session detail.";
+      eventsBody.innerHTML =
+        '<tr><td colspan="5" style="padding:0.8rem; color:#b91c1c;">Failed to load events.</td></tr>';
+      console.error(err);
+    }
+  }
+
+  loadPage();
+</script>
+{% endblock %}
