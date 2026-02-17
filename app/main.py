@@ -1,9 +1,12 @@
 from pathlib import Path
+from typing import Optional
 
 from fastapi import FastAPI, Request, Form
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from pydantic import BaseModel
+from sqlalchemy import text
 
 from .db import SessionLocal, WaitlistEntry, init_db  # NEW
 
@@ -13,6 +16,19 @@ app = FastAPI()
 
 app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
 templates = Jinja2Templates(directory=BASE_DIR / "templates")
+
+
+class AttemptIn(BaseModel):
+    client_attempt_id: Optional[str] = None
+    created_from: Optional[str] = "math_rush"
+    session_id: int
+    student_id: int
+    question: Optional[str] = None
+    answer_given: Optional[str] = None
+    is_correct: Optional[bool] = None
+    response_ms: Optional[int] = None
+    duration_seconds: Optional[int] = None
+    score: Optional[float] = None
 
 
 @app.on_event("startup")
@@ -92,3 +108,63 @@ async def signup_post(
             "name": name,
         }
     )
+
+
+@app.post("/api/v1/attempts")
+async def create_attempt(payload: AttemptIn):
+    db = SessionLocal()
+    try:
+        if payload.client_attempt_id:
+            existing = db.execute(
+                text(
+                    """
+                    SELECT id
+                    FROM attempts
+                    WHERE client_attempt_id = :client_attempt_id
+                    LIMIT 1
+                    """
+                ),
+                {"client_attempt_id": payload.client_attempt_id},
+            ).first()
+            if existing:
+                return {"status": "duplicate", "attempt_id": existing.id}
+
+        inserted = db.execute(
+            text(
+                """
+                INSERT INTO attempts (
+                    session_id,
+                    student_id,
+                    question,
+                    answer_given,
+                    is_correct,
+                    response_ms,
+                    duration_seconds,
+                    score,
+                    client_attempt_id,
+                    created_from
+                )
+                VALUES (
+                    :session_id,
+                    :student_id,
+                    :question,
+                    :answer_given,
+                    :is_correct,
+                    :response_ms,
+                    :duration_seconds,
+                    :score,
+                    :client_attempt_id,
+                    :created_from
+                )
+                RETURNING id
+                """
+            ),
+            payload.model_dump(),
+        ).first()
+        db.commit()
+        return {"status": "ok", "attempt_id": inserted.id}
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
