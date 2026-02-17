@@ -228,5 +228,7 @@ class Attempt(Base):
 
 def init_db() -> None:
     """Create all tables if they don't exist yet."""
+    _ = (WaitlistEntry, User, Class, Student, Session, Attempt)
     with engine.begin() as connection:
         Base.metadata.create_all(bind=connection, checkfirst=True)
+
