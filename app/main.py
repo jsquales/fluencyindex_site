@@ -99,6 +99,17 @@ async def signup_get(request: Request):
     )
 
 
+@app.get("/admin/sessions", response_class=HTMLResponse)
+async def admin_sessions(request: Request):
+    return templates.TemplateResponse(
+        "admin_sessions.html",
+        {
+            "request": request,
+            "page_title": "Recent Math Rush Sessions",
+        }
+    )
+
+
 @app.post("/signup", response_class=HTMLResponse)
 async def signup_post(
     request: Request,
