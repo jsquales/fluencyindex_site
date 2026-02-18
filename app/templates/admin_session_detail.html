@@ -18,7 +18,7 @@
             <th style="text-align:left; padding:0.55rem; border-bottom:1px solid var(--border);">Problem</th>
             <th style="text-align:left; padding:0.55rem; border-bottom:1px solid var(--border);">Answer</th>
             <th style="text-align:left; padding:0.55rem; border-bottom:1px solid var(--border);">Correct</th>
-            <th style="text-align:left; padding:0.55rem; border-bottom:1px solid var(--border);">Elapsed ms</th>
+            <th style="text-align:left; padding:0.55rem; border-bottom:1px solid var(--border);">Elapsed (s)</th>
             <th style="text-align:left; padding:0.55rem; border-bottom:1px solid var(--border);">Time</th>
           </tr>
         </thead>
@@ -53,6 +53,12 @@
     const num = Number(ms);
     if (!Number.isFinite(num) || num <= 0) return "-";
     return new Date(num).toLocaleString();
+  }
+
+  function fmtElapsedSeconds(ms) {
+    const num = Number(ms);
+    if (!Number.isFinite(num)) return "-";
+    return (num / 1000).toFixed(2);
   }
 
   async function loadSummary() {
@@ -99,7 +105,7 @@
           <td style="padding:0.55rem; border-bottom:1px solid var(--border);">${problem}</td>
           <td style="padding:0.55rem; border-bottom:1px solid var(--border);">${val(r.user_answer)}</td>
           <td style="padding:0.55rem; border-bottom:1px solid var(--border);">${correct}</td>
-          <td style="padding:0.55rem; border-bottom:1px solid var(--border);">${val(r.elapsed_ms)}</td>
+          <td style="padding:0.55rem; border-bottom:1px solid var(--border);">${fmtElapsedSeconds(r.elapsed_ms)}</td>
           <td style="padding:0.55rem; border-bottom:1px solid var(--border);">${fmtTime(r.timestamp_ms)}</td>
         </tr>
       `;
