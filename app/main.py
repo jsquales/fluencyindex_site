@@ -2,7 +2,7 @@ from pathlib import Path
 from typing import Optional
 
 from fastapi import FastAPI, Request, Form, Query
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
@@ -16,6 +16,8 @@ app = FastAPI()
 
 app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
 templates = Jinja2Templates(directory=BASE_DIR / "templates")
+
+APP_ADS_TXT = "google.com, pub-2528199269226724, DIRECT, f08c47fec0942fa0"
 
 
 class AttemptIn(BaseModel):
@@ -74,6 +76,11 @@ async def landing(request: Request):
         "landing.html",
         {"request": request, "page_title": "Fluency Index"}
     )
+
+
+@app.get("/app-ads.txt", response_class=PlainTextResponse)
+async def app_ads_txt():
+    return APP_ADS_TXT
 
 
 @app.get("/login", response_class=HTMLResponse)
