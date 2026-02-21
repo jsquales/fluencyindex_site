@@ -1,4 +1,8 @@
 from pathlib import Path
+import os
+import smtplib
+import ssl
+from email.message import EmailMessage
 from typing import Optional
 
 from fastapi import FastAPI, Request, Form, Query
@@ -18,6 +22,52 @@ app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
 templates = Jinja2Templates(directory=BASE_DIR / "templates")
 
 APP_ADS_TXT = "google.com, pub-2528199269226724, DIRECT, f08c47fec0942fa0"
+
+
+def send_signup_notification_email(
+    *,
+    name: str,
+    role: str,
+    email: str,
+    notes: str,
+) -> bool:
+    """Best-effort admin notification for new signup entries."""
+    sender_email = os.getenv("OUTLOOK_EMAIL")
+    sender_password = os.getenv("OUTLOOK_PASSWORD")
+    admin_notify_email = os.getenv("ADMIN_NOTIFY_EMAIL")
+
+    if not sender_email or not sender_password or not admin_notify_email:
+        print("Signup notification skipped: missing OUTLOOK_EMAIL/OUTLOOK_PASSWORD/ADMIN_NOTIFY_EMAIL")
+        return False
+
+    msg = EmailMessage()
+    msg["Subject"] = "New Fluency Index signup"
+    msg["From"] = sender_email
+    msg["To"] = admin_notify_email
+    msg.set_content(
+        "\n".join(
+            [
+                "A new waitlist signup was submitted:",
+                f"Name: {name}",
+                f"Role: {role}",
+                f"Email: {email}",
+                f"Notes: {notes.strip() if notes and notes.strip() else '(none)'}",
+            ]
+        )
+    )
+
+    try:
+        context = ssl.create_default_context()
+        with smtplib.SMTP("smtp.office365.com", 587) as server:
+            server.ehlo()
+            server.starttls(context=context)
+            server.ehlo()
+            server.login(sender_email, sender_password)
+            server.send_message(msg)
+        return True
+    except Exception as e:
+        print("Signup notification email failed:", e)
+        return False
 
 
 class AttemptIn(BaseModel):
@@ -156,6 +206,7 @@ async def signup_post(
         )
         session.add(entry)
         session.commit()
+        send_signup_notification_email(name=name, role=role, email=email, notes=notes)
     except Exception as e:
         session.rollback()
         print("Error saving waitlist signup:", e)
