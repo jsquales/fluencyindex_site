@@ -3,16 +3,18 @@ import os
 import secrets
 import smtplib
 import ssl
+import time
+from threading import Lock
 from email.message import EmailMessage
 from typing import Optional
 
-from fastapi import FastAPI, Request, Form, Query, BackgroundTasks, Depends, HTTPException
+from fastapi import FastAPI, Request, Form, Query, BackgroundTasks, Depends, HTTPException, Header
 from fastapi.responses import HTMLResponse, PlainTextResponse, FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from itsdangerous import BadSignature, URLSafeTimedSerializer
 from passlib.context import CryptContext
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import text
 
 from .db import SessionLocal, WaitlistEntry, init_db  # NEW
@@ -27,6 +29,11 @@ templates = Jinja2Templates(directory=BASE_DIR / "templates")
 APP_ADS_TXT = "google.com, pub-2528199269226724, DIRECT, f08c47fec0942fa0"
 ADMIN_SESSION_COOKIE = "admin_session"
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+LOGIN_WINDOW_SECONDS = 15 * 60
+LOGIN_BLOCK_SECONDS = 15 * 60
+LOGIN_MAX_FAILURES = 8
+_login_attempts: dict[str, dict[str, object]] = {}
+_login_attempts_lock = Lock()
 
 
 def _admin_session_serializer() -> Optional[URLSafeTimedSerializer]:
@@ -61,6 +68,50 @@ def require_admin(request: Request) -> bool:
     if token and verify_admin_session_token(token):
         return True
     raise HTTPException(status_code=303, headers={"Location": "/admin/login"})
+
+
+def require_ingest_api_key(x_api_key: Optional[str] = Header(default=None)) -> bool:
+    expected = os.getenv("INGEST_API_KEY")
+    if not expected or not x_api_key or not secrets.compare_digest(x_api_key, expected):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    return True
+
+
+def _get_client_ip(request: Request) -> str:
+    if request.client and request.client.host:
+        return request.client.host
+    return "unknown"
+
+
+def _is_login_blocked(client_ip: str) -> bool:
+    now = time.time()
+    with _login_attempts_lock:
+        entry = _login_attempts.get(client_ip)
+        if not entry:
+            return False
+        blocked_until = float(entry.get("blocked_until", 0.0))
+        if blocked_until > now:
+            return True
+        if blocked_until:
+            entry["blocked_until"] = 0.0
+        return False
+
+
+def _record_login_failure(client_ip: str) -> None:
+    now = time.time()
+    cutoff = now - LOGIN_WINDOW_SECONDS
+    with _login_attempts_lock:
+        entry = _login_attempts.setdefault(client_ip, {"fails": [], "blocked_until": 0.0})
+        fails = [float(ts) for ts in entry.get("fails", []) if float(ts) >= cutoff]
+        fails.append(now)
+        entry["fails"] = fails
+        if len(fails) >= LOGIN_MAX_FAILURES:
+            entry["blocked_until"] = now + LOGIN_BLOCK_SECONDS
+
+
+def _clear_login_failures(client_ip: str) -> None:
+    with _login_attempts_lock:
+        _login_attempts.pop(client_ip, None)
 
 
 def send_signup_notification_email(
@@ -110,47 +161,47 @@ def send_signup_notification_email(
 
 
 class AttemptIn(BaseModel):
-    client_attempt_id: Optional[str] = None
-    created_from: Optional[str] = "math_rush"
-    session_id: int
-    student_id: int
-    question: Optional[str] = None
-    answer_given: Optional[str] = None
+    client_attempt_id: Optional[str] = Field(default=None, max_length=64)
+    created_from: Optional[str] = Field(default="math_rush", max_length=64)
+    session_id: int = Field(ge=1, le=2_147_483_647)
+    student_id: int = Field(ge=1, le=2_147_483_647)
+    question: Optional[str] = Field(default=None, max_length=2000)
+    answer_given: Optional[str] = Field(default=None, max_length=2000)
     is_correct: Optional[bool] = None
-    response_ms: Optional[int] = None
-    duration_seconds: Optional[int] = None
-    score: Optional[float] = None
+    response_ms: Optional[int] = Field(default=None, ge=0, le=600_000)
+    duration_seconds: Optional[int] = Field(default=None, ge=0, le=86_400)
+    score: Optional[float] = Field(default=None, ge=0, le=1_000_000)
 
 
 class MRSessionStartIn(BaseModel):
-    device_id: str
-    client_session_id: int
-    mode: Optional[str] = None
-    difficulty: Optional[str] = None
-    count_target: Optional[int] = None
-    started_at_ms: Optional[int] = None
+    device_id: str = Field(min_length=1, max_length=128)
+    client_session_id: int = Field(ge=0, le=2_147_483_647)
+    mode: Optional[str] = Field(default=None, max_length=32)
+    difficulty: Optional[str] = Field(default=None, max_length=32)
+    count_target: Optional[int] = Field(default=None, ge=0, le=100_000)
+    started_at_ms: Optional[int] = Field(default=None, ge=0, le=4_102_444_800_000)
 
 
 class MRSessionEndIn(BaseModel):
-    device_id: str
-    client_session_id: int
-    ended_at_ms: Optional[int] = None
-    attempted: Optional[int] = None
-    correct: Optional[int] = None
-    avg_ms: Optional[int] = None
-    duration_s: Optional[int] = None
+    device_id: str = Field(min_length=1, max_length=128)
+    client_session_id: int = Field(ge=0, le=2_147_483_647)
+    ended_at_ms: Optional[int] = Field(default=None, ge=0, le=4_102_444_800_000)
+    attempted: Optional[int] = Field(default=None, ge=0, le=100_000)
+    correct: Optional[int] = Field(default=None, ge=0, le=100_000)
+    avg_ms: Optional[int] = Field(default=None, ge=0, le=600_000)
+    duration_s: Optional[int] = Field(default=None, ge=0, le=86_400)
 
 
 class MRQuestionIn(BaseModel):
-    device_id: str
-    client_session_id: int
-    a: Optional[int] = None
-    b: Optional[int] = None
-    user_answer: Optional[int] = None
+    device_id: str = Field(min_length=1, max_length=128)
+    client_session_id: int = Field(ge=0, le=2_147_483_647)
+    a: Optional[int] = Field(default=None, ge=0, le=10_000)
+    b: Optional[int] = Field(default=None, ge=0, le=10_000)
+    user_answer: Optional[int] = Field(default=None, ge=-1_000_000, le=1_000_000)
     correct: Optional[bool] = None
-    elapsed_ms: Optional[int] = None
-    timestamp_ms: Optional[int] = None
-    client_attempt_id: Optional[str] = None
+    elapsed_ms: Optional[int] = Field(default=None, ge=0, le=600_000)
+    timestamp_ms: Optional[int] = Field(default=None, ge=0, le=4_102_444_800_000)
+    client_attempt_id: Optional[str] = Field(default=None, max_length=64)
 
 
 @app.on_event("startup")
@@ -218,6 +269,10 @@ async def admin_login_post(
     username: str = Form(...),
     password: str = Form(...),
 ):
+    client_ip = _get_client_ip(request)
+    if _is_login_blocked(client_ip):
+        raise HTTPException(status_code=429, detail="Too many login attempts. Please try again later.")
+
     expected_username = os.getenv("ADMIN_USERNAME")
     password_hash = os.getenv("ADMIN_PASSWORD_HASH")
 
@@ -229,6 +284,7 @@ async def admin_login_post(
     )
 
     if not is_valid:
+        _record_login_failure(client_ip)
         return templates.TemplateResponse(
             "admin_login.html",
             {
@@ -239,6 +295,7 @@ async def admin_login_post(
             status_code=401,
         )
 
+    _clear_login_failures(client_ip)
     token = create_admin_session_token(expected_username)
     if not token:
         return templates.TemplateResponse(
@@ -264,7 +321,7 @@ async def admin_login_post(
     return response
 
 
-@app.get("/admin/logout")
+@app.post("/admin/logout")
 async def admin_logout():
     response = RedirectResponse(url="/admin/login", status_code=303)
     response.delete_cookie(key=ADMIN_SESSION_COOKIE, path="/")
@@ -315,17 +372,18 @@ async def admin_session_detail(
 async def signup_post(
     request: Request,
     background_tasks: BackgroundTasks,
-    name: str = Form(...),
-    role: str = Form(...),
-    email: str = Form(...),
-    notes: str = Form(""),
+    name: str = Form(..., max_length=80),
+    role: str = Form(..., max_length=80),
+    email: str = Form(..., max_length=254),
+    notes: str = Form("", max_length=1000),
 ):
     """
     Handle the Join the Pilot Waitlist form submission.
 
     For now, we save it to the waitlist_entries table and log it.
     """
-    print("New waitlist signup:", {"name": name, "role": role, "email": email, "notes": notes})
+    # Avoid logging PII payloads in production logs.
+    print("New waitlist signup received")
 
     # Save to the database
     session = SessionLocal()
@@ -362,7 +420,7 @@ async def signup_post(
 
 
 @app.post("/api/v1/attempts")
-async def create_attempt(payload: AttemptIn):
+async def create_attempt(payload: AttemptIn, _: bool = Depends(require_ingest_api_key)):
     db = SessionLocal()
     try:
         if payload.client_attempt_id:
@@ -422,7 +480,7 @@ async def create_attempt(payload: AttemptIn):
 
 
 @app.post("/api/v1/mr/session/start")
-async def mr_session_start(payload: MRSessionStartIn):
+async def mr_session_start(payload: MRSessionStartIn, _: bool = Depends(require_ingest_api_key)):
     db = SessionLocal()
     try:
         db.execute(
@@ -454,7 +512,7 @@ async def mr_session_start(payload: MRSessionStartIn):
 
 
 @app.post("/api/v1/mr/session/end")
-async def mr_session_end(payload: MRSessionEndIn):
+async def mr_session_end(payload: MRSessionEndIn, _: bool = Depends(require_ingest_api_key)):
     db = SessionLocal()
     try:
         db.execute(
@@ -483,7 +541,7 @@ async def mr_session_end(payload: MRSessionEndIn):
 
 
 @app.post("/api/v1/mr/question")
-async def mr_question(payload: MRQuestionIn):
+async def mr_question(payload: MRQuestionIn, _: bool = Depends(require_ingest_api_key)):
     db = SessionLocal()
     try:
         if payload.client_attempt_id:
@@ -546,6 +604,7 @@ async def mr_question(payload: MRQuestionIn):
 
 @app.get("/api/v1/mr/sessions/recent")
 async def mr_sessions_recent(
+    _: bool = Depends(require_admin),
     device_id: Optional[str] = None,
     limit: int = Query(default=50, ge=1, le=200),
 ):
@@ -590,6 +649,7 @@ async def mr_session_events(
     device_id: str,
     client_session_id: int,
     limit: int = Query(default=200, ge=1, le=200),
+    _: bool = Depends(require_admin),
 ):
     db = SessionLocal()
     try:

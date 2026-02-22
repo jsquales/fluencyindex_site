@@ -62,6 +62,15 @@
     return v === null || v === undefined ? "-" : String(v);
   }
 
+  function esc(v) {
+    return val(v)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#39;");
+  }
+
   function fmtTime(ms) {
     if (ms === null || ms === undefined) return "-";
     const num = Number(ms);
@@ -108,7 +117,7 @@
     const slowThreshold = thresholdValue(slowThresholdInput, 5.0);
 
     eventsBody.innerHTML = rows.map((r) => {
-      const problem = `${val(r.a)} x ${val(r.b)}`;
+      const problem = `${esc(r.a)} x ${esc(r.b)}`;
       const correct = r.correct === true ? "Yes" : (r.correct === false ? "No" : "-");
       const secondsNum = elapsedSecondsNumber(r.elapsed_ms);
       const secondsText = secondsNum === null ? "-" : secondsNum.toFixed(2);
@@ -116,7 +125,7 @@
       return `
         <tr>
           <td style="padding:0.55rem; border-bottom:1px solid var(--border);">${problem}</td>
-          <td style="padding:0.55rem; border-bottom:1px solid var(--border);">${val(r.user_answer)}</td>
+          <td style="padding:0.55rem; border-bottom:1px solid var(--border);">${esc(r.user_answer)}</td>
           <td style="padding:0.55rem; border-bottom:1px solid var(--border);">${correct}</td>
           <td style="padding:0.55rem; border-bottom:1px solid var(--border); ${elapsedStyle}">${secondsText}</td>
           <td style="padding:0.55rem; border-bottom:1px solid var(--border);">${fmtTime(r.timestamp_ms)}</td>
@@ -138,14 +147,14 @@
       return;
     }
     summaryEl.innerHTML =
-      `Mode: <strong>${val(match.mode)}</strong> | ` +
-      `Difficulty: <strong>${val(match.difficulty)}</strong> | ` +
-      `Attempted: <strong>${val(match.attempted)}</strong> | ` +
-      `Correct: <strong>${val(match.correct)}</strong> | ` +
-      `Avg ms: <strong>${val(match.avg_ms)}</strong> | ` +
-      `Started: <strong>${fmtTime(match.started_at_ms)}</strong> | ` +
-      `Ended: <strong>${fmtTime(match.ended_at_ms)}</strong> | ` +
-      `Events logged: <strong>${val(match.events_logged)}</strong>`;
+      `Mode: <strong>${esc(match.mode)}</strong> | ` +
+      `Difficulty: <strong>${esc(match.difficulty)}</strong> | ` +
+      `Attempted: <strong>${esc(match.attempted)}</strong> | ` +
+      `Correct: <strong>${esc(match.correct)}</strong> | ` +
+      `Avg ms: <strong>${esc(match.avg_ms)}</strong> | ` +
+      `Started: <strong>${esc(fmtTime(match.started_at_ms))}</strong> | ` +
+      `Ended: <strong>${esc(fmtTime(match.ended_at_ms))}</strong> | ` +
+      `Events logged: <strong>${esc(match.events_logged)}</strong>`;
   }
 
   async function loadEvents() {

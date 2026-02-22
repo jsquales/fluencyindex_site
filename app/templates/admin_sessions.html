@@ -45,6 +45,15 @@
     return v === null || v === undefined ? "-" : String(v);
   }
 
+  function esc(v) {
+    return val(v)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#39;");
+  }
+
   function sessionLink(deviceId, clientSessionId) {
     const encodedDevice = encodeURIComponent(String(deviceId));
     return `/admin/sessions/${encodedDevice}/${clientSessionId}`;
@@ -64,14 +73,14 @@
 
       bodyEl.innerHTML = rows.map((r) => `
         <tr>
-          <td style="padding:0.55rem; border-bottom:1px solid var(--border);">${val(r.device_id)}</td>
-          <td style="padding:0.55rem; border-bottom:1px solid var(--border);">${val(r.client_session_id)}</td>
+          <td style="padding:0.55rem; border-bottom:1px solid var(--border);">${esc(r.device_id)}</td>
+          <td style="padding:0.55rem; border-bottom:1px solid var(--border);">${esc(r.client_session_id)}</td>
           <td style="padding:0.55rem; border-bottom:1px solid var(--border);"><a href="${sessionLink(r.device_id, r.client_session_id)}">View</a></td>
-          <td style="padding:0.55rem; border-bottom:1px solid var(--border);">${val(r.mode)}</td>
-          <td style="padding:0.55rem; border-bottom:1px solid var(--border);">${val(r.difficulty)}</td>
-          <td style="padding:0.55rem; border-bottom:1px solid var(--border);">${val(r.attempted)}</td>
-          <td style="padding:0.55rem; border-bottom:1px solid var(--border);">${val(r.correct)}</td>
-          <td style="padding:0.55rem; border-bottom:1px solid var(--border);">${val(r.avg_ms)}</td>
+          <td style="padding:0.55rem; border-bottom:1px solid var(--border);">${esc(r.mode)}</td>
+          <td style="padding:0.55rem; border-bottom:1px solid var(--border);">${esc(r.difficulty)}</td>
+          <td style="padding:0.55rem; border-bottom:1px solid var(--border);">${esc(r.attempted)}</td>
+          <td style="padding:0.55rem; border-bottom:1px solid var(--border);">${esc(r.correct)}</td>
+          <td style="padding:0.55rem; border-bottom:1px solid var(--border);">${esc(r.avg_ms)}</td>
           <td style="padding:0.55rem; border-bottom:1px solid var(--border);">${fmtStarted(r.started_at_ms)}</td>
         </tr>
       `).join("");

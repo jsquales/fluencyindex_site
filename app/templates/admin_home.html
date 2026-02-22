@@ -6,7 +6,9 @@
     <h1>Admin dashboard</h1>
     <p class="auth-intro">You are logged in.</p>
     <p><a href="/admin/sessions">View recent sessions</a></p>
-    <p><a href="/admin/logout">Log out</a></p>
+    <form method="post" action="/admin/logout" style="margin:0;">
+      <button type="submit" class="btn-secondary">Log out</button>
+    </form>
   </div>
 </section>
 {% endblock %}
