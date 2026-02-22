@@ -6,7 +6,7 @@ from email.message import EmailMessage
 from typing import Optional
 
 from fastapi import FastAPI, Request, Form, Query, BackgroundTasks
-from fastapi.responses import HTMLResponse, PlainTextResponse
+from fastapi.responses import HTMLResponse, PlainTextResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
@@ -131,6 +131,11 @@ async def landing(request: Request):
 @app.get("/app-ads.txt", response_class=PlainTextResponse)
 async def app_ads_txt():
     return APP_ADS_TXT
+
+
+@app.get("/favicon.ico", include_in_schema=False)
+async def favicon():
+    return FileResponse(BASE_DIR / "static" / "favicon.png")
 
 
 @app.get("/login", response_class=HTMLResponse)
