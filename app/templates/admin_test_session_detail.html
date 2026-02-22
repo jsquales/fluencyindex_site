@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+
+{% block content %}
+<section class="auth-section">
+  <div class="auth-card">
+    <h1>Student Test Session</h1>
+    <p class="auth-intro">Session initialized and ready for test UI integration.</p>
+
+    <p><strong>Session ID:</strong> {{ session.id }}</p>
+    <p><strong>Student ID:</strong> {{ session.student_id }}</p>
+    <p><strong>Status:</strong> {{ session.status }}</p>
+
+    <div style="margin:1rem 0; padding:0.9rem; border:1px dashed var(--border); border-radius:10px; color:var(--text-muted);">
+      Placeholder: future test UI will render here.
+    </div>
+
+    <p><a href="/admin">Back to dashboard</a></p>
+  </div>
+</section>
+{% endblock %}

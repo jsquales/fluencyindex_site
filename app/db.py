@@ -233,6 +233,32 @@ def init_db() -> None:
             connection.execute(
                 text(
                     """
+                    CREATE TABLE IF NOT EXISTS admin_test_sessions (
+                        id BIGSERIAL PRIMARY KEY,
+                        student_id VARCHAR(128) NOT NULL,
+                        status VARCHAR(32) NOT NULL DEFAULT 'started',
+                        created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+                    );
+                    """
+                )
+            )
+        else:
+            connection.execute(
+                text(
+                    """
+                    CREATE TABLE IF NOT EXISTS admin_test_sessions (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        student_id VARCHAR(128) NOT NULL,
+                        status VARCHAR(32) NOT NULL DEFAULT 'started',
+                        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+                    );
+                    """
+                )
+            )
+        if connection.dialect.name == "postgresql":
+            connection.execute(
+                text(
+                    """
                     CREATE TABLE IF NOT EXISTS mr_sessions (
                         id SERIAL PRIMARY KEY,
                         device_id VARCHAR(64) NOT NULL,

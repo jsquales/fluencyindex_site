@@ -368,6 +368,98 @@ async def admin_session_detail(
     )
 
 
+@app.get("/admin/test", response_class=HTMLResponse)
+async def admin_test_get(request: Request, _: bool = Depends(require_admin)):
+    return templates.TemplateResponse(
+        "admin_test_start.html",
+        {
+            "request": request,
+            "page_title": "Start Student Test | Fluency Index",
+            "error": None,
+            "student_id": "",
+        },
+    )
+
+
+@app.post("/admin/test/start")
+async def admin_test_start(
+    request: Request,
+    student_id: str = Form(...),
+    _: bool = Depends(require_admin),
+):
+    normalized_student_id = student_id.strip()
+    if len(normalized_student_id) < 2 or len(normalized_student_id) > 128:
+        return templates.TemplateResponse(
+            "admin_test_start.html",
+            {
+                "request": request,
+                "page_title": "Start Student Test | Fluency Index",
+                "error": "Student ID must be between 2 and 128 characters.",
+                "student_id": normalized_student_id,
+            },
+            status_code=400,
+        )
+
+    db = SessionLocal()
+    try:
+        inserted = db.execute(
+            text(
+                """
+                INSERT INTO admin_test_sessions (student_id, status)
+                VALUES (:student_id, 'started')
+                RETURNING id;
+                """
+            ),
+            {"student_id": normalized_student_id},
+        ).first()
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+    if not inserted:
+        raise HTTPException(status_code=500, detail="Failed to create test session.")
+
+    return RedirectResponse(url=f"/admin/test/{inserted.id}", status_code=303)
+
+
+@app.get("/admin/test/{session_id}", response_class=HTMLResponse)
+async def admin_test_session_detail(
+    request: Request,
+    session_id: int,
+    _: bool = Depends(require_admin),
+):
+    db = SessionLocal()
+    try:
+        row = db.execute(
+            text(
+                """
+                SELECT id, student_id, status, created_at
+                FROM admin_test_sessions
+                WHERE id = :session_id
+                LIMIT 1;
+                """
+            ),
+            {"session_id": session_id},
+        ).first()
+    finally:
+        db.close()
+
+    if not row:
+        raise HTTPException(status_code=404, detail="Test session not found.")
+
+    return templates.TemplateResponse(
+        "admin_test_session_detail.html",
+        {
+            "request": request,
+            "page_title": "Student Test Session | Fluency Index",
+            "session": dict(row._mapping),
+        },
+    )
+
+
 @app.post("/signup", response_class=HTMLResponse)
 async def signup_post(
     request: Request,

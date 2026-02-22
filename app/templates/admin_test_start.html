@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+
+{% block content %}
+<section class="auth-section">
+  <div class="auth-card">
+    <h1>Start Student Test</h1>
+    <p class="auth-intro">Create a new test session for a student.</p>
+
+    {% if error %}
+    <p class="helper-text" style="color:#b91c1c;">{{ error }}</p>
+    {% endif %}
+
+    <form class="auth-form" method="post" action="/admin/test/start">
+      <label class="auth-field">
+        <span>Student ID</span>
+        <input type="text" name="student_id" value="{{ student_id }}" minlength="2" maxlength="128" required>
+      </label>
+
+      <button type="submit" class="btn-primary">Start Test</button>
+    </form>
+
+    <p><a href="/admin">Back to dashboard</a></p>
+  </div>
+</section>
+{% endblock %}
