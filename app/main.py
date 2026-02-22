@@ -5,7 +5,7 @@ import ssl
 from email.message import EmailMessage
 from typing import Optional
 
-from fastapi import FastAPI, Request, Form, Query
+from fastapi import FastAPI, Request, Form, Query, BackgroundTasks
 from fastapi.responses import HTMLResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -183,6 +183,7 @@ async def admin_session_detail(request: Request, device_id: str, client_session_
 @app.post("/signup", response_class=HTMLResponse)
 async def signup_post(
     request: Request,
+    background_tasks: BackgroundTasks,
     name: str = Form(...),
     role: str = Form(...),
     email: str = Form(...),
@@ -206,7 +207,13 @@ async def signup_post(
         )
         session.add(entry)
         session.commit()
-        send_signup_notification_email(name=name, role=role, email=email, notes=notes)
+        background_tasks.add_task(
+            send_signup_notification_email,
+            name=name,
+            role=role,
+            email=email,
+            notes=notes,
+        )
     except Exception as e:
         session.rollback()
         print("Error saving waitlist signup:", e)
