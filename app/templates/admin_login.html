@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+
+{% block content %}
+<section class="auth-section">
+  <div class="auth-card">
+    <h1>Admin Login</h1>
+    <p class="auth-intro">Sign in to access admin pages.</p>
+
+    {% if error %}
+    <p class="helper-text" style="color:#b91c1c;">{{ error }}</p>
+    {% endif %}
+
+    <form class="auth-form" method="post" action="/admin/login">
+      <label class="auth-field">
+        <span>Username</span>
+        <input type="text" name="username" required>
+      </label>
+
+      <label class="auth-field">
+        <span>Password</span>
+        <input type="password" name="password" required>
+      </label>
+
+      <button type="submit" class="btn-primary">Sign In</button>
+    </form>
+  </div>
+</section>
+{% endblock %}

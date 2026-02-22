@@ -1,14 +1,17 @@
 from pathlib import Path
 import os
+import secrets
 import smtplib
 import ssl
 from email.message import EmailMessage
 from typing import Optional
 
-from fastapi import FastAPI, Request, Form, Query, BackgroundTasks
-from fastapi.responses import HTMLResponse, PlainTextResponse, FileResponse
+from fastapi import FastAPI, Request, Form, Query, BackgroundTasks, Depends, HTTPException
+from fastapi.responses import HTMLResponse, PlainTextResponse, FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from itsdangerous import BadSignature, URLSafeTimedSerializer
+from passlib.context import CryptContext
 from pydantic import BaseModel
 from sqlalchemy import text
 
@@ -22,6 +25,42 @@ app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
 templates = Jinja2Templates(directory=BASE_DIR / "templates")
 
 APP_ADS_TXT = "google.com, pub-2528199269226724, DIRECT, f08c47fec0942fa0"
+ADMIN_SESSION_COOKIE = "admin_session"
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
+
+def _admin_session_serializer() -> Optional[URLSafeTimedSerializer]:
+    secret_key = os.getenv("SESSION_SECRET_KEY")
+    if not secret_key:
+        return None
+    return URLSafeTimedSerializer(secret_key, salt="admin-session")
+
+
+def create_admin_session_token(username: str) -> Optional[str]:
+    serializer = _admin_session_serializer()
+    if not serializer:
+        return None
+    return serializer.dumps({"u": username})
+
+
+def verify_admin_session_token(token: str) -> bool:
+    serializer = _admin_session_serializer()
+    expected_username = os.getenv("ADMIN_USERNAME")
+    if not serializer or not expected_username:
+        return False
+    try:
+        payload = serializer.loads(token, max_age=60 * 60 * 24 * 7)
+    except BadSignature:
+        return False
+    username = payload.get("u") if isinstance(payload, dict) else None
+    return isinstance(username, str) and secrets.compare_digest(username, expected_username)
+
+
+def require_admin(request: Request) -> bool:
+    token = request.cookies.get(ADMIN_SESSION_COOKIE)
+    if token and verify_admin_session_token(token):
+        return True
+    raise HTTPException(status_code=303, headers={"Location": "/admin/login"})
 
 
 def send_signup_notification_email(
@@ -161,8 +200,90 @@ async def signup_get(request: Request):
     )
 
 
+@app.get("/admin/login", response_class=HTMLResponse)
+async def admin_login_get(request: Request):
+    return templates.TemplateResponse(
+        "admin_login.html",
+        {
+            "request": request,
+            "page_title": "Admin Login | Fluency Index",
+            "error": None,
+        },
+    )
+
+
+@app.post("/admin/login", response_class=HTMLResponse)
+async def admin_login_post(
+    request: Request,
+    username: str = Form(...),
+    password: str = Form(...),
+):
+    expected_username = os.getenv("ADMIN_USERNAME")
+    password_hash = os.getenv("ADMIN_PASSWORD_HASH")
+
+    is_valid = (
+        bool(expected_username)
+        and bool(password_hash)
+        and secrets.compare_digest(username, expected_username)
+        and pwd_context.verify(password, password_hash)
+    )
+
+    if not is_valid:
+        return templates.TemplateResponse(
+            "admin_login.html",
+            {
+                "request": request,
+                "page_title": "Admin Login | Fluency Index",
+                "error": "Invalid username or password.",
+            },
+            status_code=401,
+        )
+
+    token = create_admin_session_token(expected_username)
+    if not token:
+        return templates.TemplateResponse(
+            "admin_login.html",
+            {
+                "request": request,
+                "page_title": "Admin Login | Fluency Index",
+                "error": "Admin login is not configured.",
+            },
+            status_code=500,
+        )
+
+    response = RedirectResponse(url="/admin", status_code=303)
+    response.set_cookie(
+        key=ADMIN_SESSION_COOKIE,
+        value=token,
+        httponly=True,
+        secure=True,
+        samesite="lax",
+        path="/",
+        max_age=60 * 60 * 24 * 7,
+    )
+    return response
+
+
+@app.get("/admin/logout")
+async def admin_logout():
+    response = RedirectResponse(url="/admin/login", status_code=303)
+    response.delete_cookie(key=ADMIN_SESSION_COOKIE, path="/")
+    return response
+
+
+@app.get("/admin", response_class=HTMLResponse)
+async def admin_home(request: Request, _: bool = Depends(require_admin)):
+    return templates.TemplateResponse(
+        "admin_home.html",
+        {
+            "request": request,
+            "page_title": "Admin | Fluency Index",
+        },
+    )
+
+
 @app.get("/admin/sessions", response_class=HTMLResponse)
-async def admin_sessions(request: Request):
+async def admin_sessions(request: Request, _: bool = Depends(require_admin)):
     return templates.TemplateResponse(
         "admin_sessions.html",
         {
@@ -173,7 +294,12 @@ async def admin_sessions(request: Request):
 
 
 @app.get("/admin/sessions/{device_id}/{client_session_id}", response_class=HTMLResponse)
-async def admin_session_detail(request: Request, device_id: str, client_session_id: int):
+async def admin_session_detail(
+    request: Request,
+    device_id: str,
+    client_session_id: int,
+    _: bool = Depends(require_admin),
+):
     return templates.TemplateResponse(
         "admin_session_detail.html",
         {
