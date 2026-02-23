@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+
+{% block content %}
+<section class="auth-section">
+  <div class="auth-card">
+    <h1>Fluency Test</h1>
+    <p class="auth-intro">Session #{{ session_id }}</p>
+    <div style="margin:1rem 0; padding:0.9rem; border:1px dashed var(--border); border-radius:10px; color:var(--text-muted);">
+      Test runner UI placeholder.
+    </div>
+    <p><a href="/test/checkin">Back to check-in</a></p>
+  </div>
+</section>
+{% endblock %}
