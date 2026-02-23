@@ -4,12 +4,34 @@
 <section class="auth-section">
   <div class="auth-card">
     <h1>Fluency Test</h1>
-    <p class="auth-intro">Session #{{ session_id }}</p>
-    <div style="margin:1rem 0; padding:0.9rem; border:1px dashed var(--border); border-radius:10px; color:var(--text-muted);">
-      Test runner UI placeholder.
-    </div>
+    <p class="auth-intro">Session #{{ session_id }} | Question {{ question_number }} of {{ question_total }}</p>
+
+    <div style="margin:1rem 0; font-size:2rem; font-weight:700;">{{ a }} x {{ b }} = ?</div>
+
+    <form method="post" action="/test/run/{{ session_id }}/answer" id="answer-form">
+      <input type="hidden" name="a" value="{{ a }}">
+      <input type="hidden" name="b" value="{{ b }}">
+      <input type="hidden" name="elapsed_ms" id="elapsed-ms" value="">
+      <label class="auth-field" style="max-width:240px;">
+        <span>Answer</span>
+        <input type="text" name="answer" inputmode="numeric" autofocus required>
+      </label>
+      <button type="submit" class="btn-primary" style="margin-top:0.5rem;">Submit</button>
+    </form>
+
     <p><a href="/admin/test/session/{{ session_id }}">Verify session tracking</a></p>
     <p><a href="/admin/test/checkin">Back to check-in</a></p>
   </div>
 </section>
+
+<script>
+  const startedAt = Date.now();
+  const formEl = document.getElementById("answer-form");
+  const elapsedInput = document.getElementById("elapsed-ms");
+  if (formEl && elapsedInput) {
+    formEl.addEventListener("submit", () => {
+      elapsedInput.value = String(Math.max(0, Date.now() - startedAt));
+    });
+  }
+</script>
 {% endblock %}

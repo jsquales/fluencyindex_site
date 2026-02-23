@@ -1,5 +1,6 @@
 from pathlib import Path
 import os
+import random
 import re
 import secrets
 import smtplib
@@ -37,6 +38,9 @@ LOGIN_BLOCK_SECONDS = 15 * 60
 LOGIN_MAX_FAILURES = 8
 _login_attempts: dict[str, dict[str, object]] = {}
 _login_attempts_lock = Lock()
+TEST_FACTOR_MIN = 1
+TEST_FACTOR_MAX = 12
+TEST_TOTAL_QUESTIONS = 10
 
 
 def _admin_session_serializer() -> Optional[URLSafeTimedSerializer]:
@@ -267,13 +271,244 @@ async def test_checkin_start(student_id: str = Form(...)):
 
 
 @app.get("/test/run/{session_id}", response_class=HTMLResponse)
-async def run_test_page(session_id: int, request: Request):
+async def run_test_page(session_id: int, request: Request, _: bool = Depends(require_admin)):
+    db = SessionLocal()
+    try:
+        session_row = db.execute(
+            text(
+                """
+                SELECT id, class_id, teacher_id, student_identifier, status, started_at
+                FROM sessions
+                WHERE id = :session_id
+                LIMIT 1
+                """
+            ),
+            {"session_id": session_id},
+        ).first()
+        if not session_row:
+            raise HTTPException(status_code=404, detail="Session not found.")
+
+        attempt_count = int(
+            db.execute(
+                text("SELECT COUNT(*) AS c FROM attempts WHERE session_id = :session_id"),
+                {"session_id": session_id},
+            ).scalar_one()
+        )
+        if attempt_count >= TEST_TOTAL_QUESTIONS:
+            return RedirectResponse(url=f"/test/results/{session_id}", status_code=303)
+
+        existing_questions = {
+            str(row.question)
+            for row in db.execute(
+                text(
+                    """
+                    SELECT question
+                    FROM attempts
+                    WHERE session_id = :session_id
+                    """
+                ),
+                {"session_id": session_id},
+            ).fetchall()
+            if row.question
+        }
+    finally:
+        db.close()
+
+    a = random.randint(TEST_FACTOR_MIN, TEST_FACTOR_MAX)
+    b = random.randint(TEST_FACTOR_MIN, TEST_FACTOR_MAX)
+    question_text = f"{a} x {b}"
+    for _ in range(24):
+        if question_text not in existing_questions:
+            break
+        a = random.randint(TEST_FACTOR_MIN, TEST_FACTOR_MAX)
+        b = random.randint(TEST_FACTOR_MIN, TEST_FACTOR_MAX)
+        question_text = f"{a} x {b}"
+
     return templates.TemplateResponse(
         "test_run.html",
         {
             "request": request,
             "page_title": "Fluency Test | Fluency Index",
             "session_id": session_id,
+            "question_number": attempt_count + 1,
+            "question_total": TEST_TOTAL_QUESTIONS,
+            "a": a,
+            "b": b,
+        },
+    )
+
+
+@app.post("/test/run/{session_id}/answer")
+async def submit_test_answer(
+    session_id: int,
+    a: int = Form(...),
+    b: int = Form(...),
+    answer: str = Form(""),
+    elapsed_ms: Optional[int] = Form(default=None),
+    _: bool = Depends(require_admin),
+):
+    db = SessionLocal()
+    try:
+        session_row = db.execute(
+            text(
+                """
+                SELECT id, class_id, student_identifier
+                FROM sessions
+                WHERE id = :session_id
+                LIMIT 1
+                """
+            ),
+            {"session_id": session_id},
+        ).first()
+        if not session_row:
+            raise HTTPException(status_code=404, detail="Session not found.")
+
+        student_row = db.execute(
+            text(
+                """
+                SELECT id
+                FROM students
+                WHERE class_id = :class_id
+                  AND student_identifier = :student_identifier
+                LIMIT 1
+                """
+            ),
+            {
+                "class_id": int(session_row.class_id),
+                "student_identifier": str(session_row.student_identifier or ""),
+            },
+        ).first()
+        if not student_row:
+            raise HTTPException(status_code=400, detail="Student record not found for session.")
+
+        normalized_answer = answer.strip()
+        answer_int: Optional[int] = None
+        if normalized_answer:
+            try:
+                answer_int = int(normalized_answer)
+            except ValueError:
+                answer_int = None
+
+        correct_answer = int(a) * int(b)
+        is_correct = answer_int is not None and answer_int == correct_answer
+        bounded_elapsed_ms = None
+        if elapsed_ms is not None:
+            bounded_elapsed_ms = max(0, min(int(elapsed_ms), 60_000))
+
+        db.execute(
+            text(
+                """
+                INSERT INTO attempts (
+                    session_id,
+                    student_id,
+                    question,
+                    answer_given,
+                    is_correct,
+                    response_ms,
+                    duration_seconds,
+                    score,
+                    created_from
+                )
+                VALUES (
+                    :session_id,
+                    :student_id,
+                    :question,
+                    :answer_given,
+                    :is_correct,
+                    :response_ms,
+                    :duration_seconds,
+                    :score,
+                    :created_from
+                )
+                """
+            ),
+            {
+                "session_id": session_id,
+                "student_id": int(student_row.id),
+                "question": f"{a} x {b}",
+                "answer_given": normalized_answer if normalized_answer else None,
+                "is_correct": is_correct,
+                "response_ms": bounded_elapsed_ms,
+                "duration_seconds": (bounded_elapsed_ms // 1000) if bounded_elapsed_ms is not None else None,
+                "score": 1.0 if is_correct else 0.0,
+                "created_from": "pilot_web_runner",
+            },
+        )
+        db.commit()
+
+        attempt_count = int(
+            db.execute(
+                text("SELECT COUNT(*) AS c FROM attempts WHERE session_id = :session_id"),
+                {"session_id": session_id},
+            ).scalar_one()
+        )
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+    if attempt_count >= TEST_TOTAL_QUESTIONS:
+        return RedirectResponse(url=f"/test/results/{session_id}", status_code=303)
+    return RedirectResponse(url=f"/test/run/{session_id}", status_code=303)
+
+
+@app.get("/test/results/{session_id}", response_class=HTMLResponse)
+async def test_results_page(session_id: int, request: Request, _: bool = Depends(require_admin)):
+    db = SessionLocal()
+    try:
+        session_row = db.execute(
+            text(
+                """
+                SELECT
+                    s.id AS session_id,
+                    s.status AS status,
+                    s.started_at AS started_at,
+                    s.teacher_id AS teacher_id,
+                    s.student_identifier AS student_identifier,
+                    c.room_code AS room_code
+                FROM sessions s
+                LEFT JOIN classes c ON c.id = s.class_id
+                WHERE s.id = :session_id
+                LIMIT 1
+                """
+            ),
+            {"session_id": session_id},
+        ).first()
+        if not session_row:
+            raise HTTPException(status_code=404, detail="Session not found.")
+
+        attempts = db.execute(
+            text(
+                """
+                SELECT question, answer_given, is_correct, response_ms
+                FROM attempts
+                WHERE session_id = :session_id
+                ORDER BY id ASC
+                """
+            ),
+            {"session_id": session_id},
+        ).fetchall()
+    finally:
+        db.close()
+
+    total = len(attempts)
+    correct = sum(1 for r in attempts if bool(r.is_correct))
+    accuracy_pct = round((correct / total) * 100, 1) if total else 0.0
+    response_values = [int(r.response_ms) for r in attempts if r.response_ms is not None]
+    avg_ms = round(sum(response_values) / len(response_values), 1) if response_values else None
+
+    return templates.TemplateResponse(
+        "test_results.html",
+        {
+            "request": request,
+            "page_title": "Test Results | Fluency Index",
+            "session": dict(session_row._mapping),
+            "attempts": [dict(r._mapping) for r in attempts],
+            "total": total,
+            "correct": correct,
+            "accuracy_pct": accuracy_pct,
+            "avg_ms": avg_ms,
         },
     )
 

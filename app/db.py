@@ -234,11 +234,37 @@ def init_db() -> None:
             connection.execute(
                 text(
                     """
+                    CREATE TABLE IF NOT EXISTS attempts (
+                        id BIGSERIAL PRIMARY KEY,
+                        session_id BIGINT NOT NULL REFERENCES sessions(id),
+                        student_id BIGINT NOT NULL REFERENCES students(id),
+                        question TEXT,
+                        answer_given TEXT,
+                        is_correct BOOLEAN,
+                        response_ms INTEGER,
+                        duration_seconds INTEGER,
+                        score DOUBLE PRECISION,
+                        created_from VARCHAR(64),
+                        created_at TIMESTAMPTZ DEFAULT now()
+                    );
+                    """
+                )
+            )
+            connection.execute(
+                text(
+                    """
                     ALTER TABLE sessions
                     ADD COLUMN IF NOT EXISTS student_identifier VARCHAR(128);
                     """
                 )
             )
+            connection.execute(text("ALTER TABLE attempts ADD COLUMN IF NOT EXISTS question TEXT;"))
+            connection.execute(text("ALTER TABLE attempts ADD COLUMN IF NOT EXISTS answer_given TEXT;"))
+            connection.execute(text("ALTER TABLE attempts ADD COLUMN IF NOT EXISTS is_correct BOOLEAN;"))
+            connection.execute(text("ALTER TABLE attempts ADD COLUMN IF NOT EXISTS response_ms INTEGER;"))
+            connection.execute(text("ALTER TABLE attempts ADD COLUMN IF NOT EXISTS duration_seconds INTEGER;"))
+            connection.execute(text("ALTER TABLE attempts ADD COLUMN IF NOT EXISTS score DOUBLE PRECISION;"))
+            connection.execute(text("ALTER TABLE attempts ADD COLUMN IF NOT EXISTS created_from VARCHAR(64);"))
         if connection.dialect.name == "postgresql":
             connection.execute(
                 text(

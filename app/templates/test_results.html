@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+
+{% block content %}
+<section class="auth-section">
+  <div class="auth-card">
+    <h1>Test Results</h1>
+    <p class="auth-intro">Session #{{ session.session_id }}</p>
+
+    <p><strong>Room:</strong> {{ session.room_code if session.room_code else "-" }}</p>
+    <p><strong>Student ID:</strong> {{ session.student_identifier if session.student_identifier else "-" }}</p>
+    <p><strong>Teacher ID:</strong> {{ session.teacher_id }}</p>
+    <p><strong>Questions:</strong> {{ total }}</p>
+    <p><strong>Correct:</strong> {{ correct }}</p>
+    <p><strong>Accuracy:</strong> {{ accuracy_pct }}%</p>
+    <p><strong>Avg Response:</strong> {{ (avg_ms ~ " ms") if avg_ms is not none else "-" }}</p>
+
+    <h2 style="margin-top:1rem; margin-bottom:0.5rem; font-size:1.05rem;">Attempts</h2>
+    {% if attempts and attempts|length > 0 %}
+    <div style="overflow-x:auto;">
+      <table style="width:100%; border-collapse:collapse; font-size:0.92rem;">
+        <thead>
+          <tr>
+            <th style="text-align:left; padding:0.5rem; border-bottom:1px solid var(--border);">Question</th>
+            <th style="text-align:left; padding:0.5rem; border-bottom:1px solid var(--border);">Answer</th>
+            <th style="text-align:left; padding:0.5rem; border-bottom:1px solid var(--border);">Correct</th>
+            <th style="text-align:left; padding:0.5rem; border-bottom:1px solid var(--border);">ms</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in attempts %}
+          <tr>
+            <td style="padding:0.5rem; border-bottom:1px solid var(--border);">{{ row.question if row.question else "-" }}</td>
+            <td style="padding:0.5rem; border-bottom:1px solid var(--border);">{{ row.answer_given if row.answer_given is not none and row.answer_given != "" else "-" }}</td>
+            <td style="padding:0.5rem; border-bottom:1px solid var(--border);">{{ "Yes" if row.is_correct == True else ("No" if row.is_correct == False else "-") }}</td>
+            <td style="padding:0.5rem; border-bottom:1px solid var(--border);">{{ row.response_ms if row.response_ms is not none else "-" }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <p class="helper-text">No attempts recorded for this session.</p>
+    {% endif %}
+
+    <p style="margin-top:1rem;"><a href="/admin/test/checkin">Start next student</a></p>
+    <p><a href="/admin/test/session/{{ session.session_id }}">Verify session tracking</a></p>
+  </div>
+</section>
+{% endblock %}
