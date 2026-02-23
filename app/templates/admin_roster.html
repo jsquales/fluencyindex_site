@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+
+{% block content %}
+<section class="auth-section">
+  <div class="auth-card">
+    <h1>Quick Add Student</h1>
+    <p class="auth-intro">Add students one at a time during pilot testing.</p>
+
+    {% if table_error %}
+    <p class="helper-text" style="color:#b91c1c;">{{ table_error }}</p>
+    {% endif %}
+    {% if error %}
+    <p class="helper-text" style="color:#b91c1c;">{{ error }}</p>
+    {% endif %}
+    {% if success %}
+    <p class="helper-text" style="color:#166534;">{{ success }}</p>
+    {% endif %}
+
+    <form class="auth-form" method="post" action="/admin/roster/add">
+      <label class="auth-field">
+        <span>Room</span>
+        <input type="text" name="room" value="{{ room }}" placeholder="A01" minlength="3" maxlength="3" required>
+      </label>
+      <label class="auth-field">
+        <span>Student ID</span>
+        <input type="text" name="student_id" value="{{ student_id }}" placeholder="123456" inputmode="numeric" minlength="6" maxlength="6" required>
+      </label>
+      <button type="submit" class="btn-primary">Add Student</button>
+    </form>
+
+    <h2 style="margin-top:1rem; margin-bottom:0.5rem; font-size:1.05rem;">Last 10 Students Added</h2>
+    {% if recent_students and recent_students|length > 0 %}
+    <div style="overflow-x:auto;">
+      <table style="width:100%; border-collapse:collapse; font-size:0.92rem;">
+        <thead>
+          <tr>
+            <th style="text-align:left; padding:0.5rem; border-bottom:1px solid var(--border);">Room</th>
+            <th style="text-align:left; padding:0.5rem; border-bottom:1px solid var(--border);">Student ID</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in recent_students %}
+          <tr>
+            <td style="padding:0.5rem; border-bottom:1px solid var(--border);">{{ row.room_code }}</td>
+            <td style="padding:0.5rem; border-bottom:1px solid var(--border);">{{ row.student_identifier }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <p class="helper-text">No students added yet.</p>
+    {% endif %}
+  </div>
+</section>
+{% endblock %}
