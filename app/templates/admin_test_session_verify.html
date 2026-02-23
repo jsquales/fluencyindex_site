@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+
+{% block content %}
+<section class="auth-section">
+  <div class="auth-card">
+    <h1>Pilot Session Verify</h1>
+    <p class="auth-intro">Basic session tracking details for pilot verification.</p>
+
+    <p><strong>Session ID:</strong> {{ session.session_id }}</p>
+    <p><strong>Room:</strong> {{ session.room_code if session.room_code else "-" }}</p>
+    <p><strong>Teacher ID:</strong> {{ session.teacher_id }}</p>
+    <p><strong>Started At:</strong> {{ session.started_at if session.started_at else "-" }}</p>
+    <p><strong>Status:</strong> {{ session.status if session.status else "-" }}</p>
+    <p><strong>Student ID:</strong> {{ session.student_identifier if session.student_identifier else "-" }}</p>
+
+    <p><a href="/admin">Back to dashboard</a></p>
+  </div>
+</section>
+{% endblock %}

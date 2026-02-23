@@ -42,6 +42,7 @@ def start_session(student_id: str) -> int:
         session = Session(
             class_id=int(row.class_id),
             teacher_id=int(row.teacher_id),
+            student_identifier=sid,
             status="scheduled",
             started_at=datetime.utcnow(),
         )

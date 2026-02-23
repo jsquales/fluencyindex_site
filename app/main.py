@@ -677,6 +677,48 @@ async def admin_test_checkin_start(
         return RedirectResponse(url=f"/admin/test/checkin?error={quote(str(e))}", status_code=303)
 
 
+@app.get("/admin/test/session/{session_id}", response_class=HTMLResponse)
+async def admin_test_session_verify(
+    request: Request,
+    session_id: int,
+    _: bool = Depends(require_admin),
+):
+    db = SessionLocal()
+    try:
+        row = db.execute(
+            text(
+                """
+                SELECT
+                    s.id AS session_id,
+                    c.room_code AS room_code,
+                    s.teacher_id AS teacher_id,
+                    s.started_at AS started_at,
+                    s.status AS status,
+                    s.student_identifier AS student_identifier
+                FROM sessions s
+                LEFT JOIN classes c ON c.id = s.class_id
+                WHERE s.id = :session_id
+                LIMIT 1
+                """
+            ),
+            {"session_id": session_id},
+        ).first()
+    finally:
+        db.close()
+
+    if not row:
+        raise HTTPException(status_code=404, detail="Session not found.")
+
+    return templates.TemplateResponse(
+        "admin_test_session_verify.html",
+        {
+            "request": request,
+            "page_title": "Pilot Session Verify | Fluency Index",
+            "session": dict(row._mapping),
+        },
+    )
+
+
 @app.get("/admin/sessions", response_class=HTMLResponse)
 async def admin_sessions(request: Request, _: bool = Depends(require_admin)):
     return templates.TemplateResponse(

@@ -181,6 +181,7 @@ class Session(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
     class_id: Mapped[int] = mapped_column(ForeignKey("classes.id", ondelete="CASCADE"), index=True)
     teacher_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"), index=True)
+    student_identifier: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
     status: Mapped[str] = mapped_column(String(32), nullable=False, server_default="scheduled")
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -229,6 +230,15 @@ def init_db() -> None:
     _ = (WaitlistEntry, User, Class, Student, Session, Attempt)
     with engine.begin() as connection:
         Base.metadata.create_all(bind=connection, checkfirst=True)
+        if connection.dialect.name == "postgresql":
+            connection.execute(
+                text(
+                    """
+                    ALTER TABLE sessions
+                    ADD COLUMN IF NOT EXISTS student_identifier VARCHAR(128);
+                    """
+                )
+            )
         if connection.dialect.name == "postgresql":
             connection.execute(
                 text(
