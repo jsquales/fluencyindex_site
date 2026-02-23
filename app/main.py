@@ -1,5 +1,6 @@
 from pathlib import Path
 import os
+import re
 import secrets
 import smtplib
 import ssl
@@ -362,6 +363,289 @@ async def admin_home(request: Request, _: bool = Depends(require_admin)):
             "request": request,
             "page_title": "Admin | Fluency Index",
         },
+    )
+
+
+def _table_columns(db, table_name: str) -> set[str]:
+    rows = db.execute(
+        text(
+            """
+            SELECT column_name
+            FROM information_schema.columns
+            WHERE table_schema = current_schema()
+              AND table_name = :table_name
+            """
+        ),
+        {"table_name": table_name},
+    ).fetchall()
+    return {str(r.column_name) for r in rows}
+
+
+def _ensure_pilot_roster_tables(db) -> None:
+    db.execute(
+        text(
+            """
+            CREATE TABLE IF NOT EXISTS classes (
+                id BIGSERIAL PRIMARY KEY,
+                room_code VARCHAR(16) UNIQUE,
+                teacher_id INTEGER NOT NULL
+            )
+            """
+        )
+    )
+    db.execute(
+        text(
+            """
+            CREATE TABLE IF NOT EXISTS students (
+                id BIGSERIAL PRIMARY KEY,
+                student_identifier VARCHAR(128) UNIQUE,
+                class_id BIGINT NOT NULL REFERENCES classes(id),
+                is_active BOOLEAN NOT NULL DEFAULT true
+            )
+            """
+        )
+    )
+
+    class_columns = _table_columns(db, "classes")
+    if "room_code" not in class_columns:
+        db.execute(text("ALTER TABLE classes ADD COLUMN room_code VARCHAR(16)"))
+
+    student_columns = _table_columns(db, "students")
+    if "is_active" not in student_columns:
+        db.execute(text("ALTER TABLE students ADD COLUMN is_active BOOLEAN NOT NULL DEFAULT true"))
+
+
+def _ensure_teacher_one(db) -> None:
+    user_columns = _table_columns(db, "users")
+    if not user_columns:
+        return
+    exists = db.execute(text("SELECT id FROM users WHERE id = 1 LIMIT 1")).first()
+    if exists:
+        return
+
+    insert_cols = ["id"]
+    insert_vals = [":id"]
+    params = {"id": 1}
+    if "full_name" in user_columns:
+        insert_cols.append("full_name")
+        insert_vals.append(":full_name")
+        params["full_name"] = "Pilot Teacher"
+    if "email" in user_columns:
+        insert_cols.append("email")
+        insert_vals.append(":email")
+        params["email"] = "pilot-teacher@local"
+    if "role" in user_columns:
+        insert_cols.append("role")
+        insert_vals.append(":role")
+        params["role"] = "teacher"
+    if "is_active" in user_columns:
+        insert_cols.append("is_active")
+        insert_vals.append(":is_active")
+        params["is_active"] = True
+
+    db.execute(
+        text(
+            f"""
+            INSERT INTO users ({", ".join(insert_cols)})
+            VALUES ({", ".join(insert_vals)})
+            """
+        ),
+        params,
+    )
+
+
+def _load_recent_roster_students(limit: int = 10) -> list[dict]:
+    db = SessionLocal()
+    try:
+        _ensure_pilot_roster_tables(db)
+        rows = db.execute(
+            text(
+                """
+                SELECT
+                    c.room_code,
+                    s.student_identifier
+                FROM students s
+                JOIN classes c ON c.id = s.class_id
+                ORDER BY s.id DESC
+                LIMIT :limit
+                """
+            ),
+            {"limit": limit},
+        ).fetchall()
+        return [dict(r._mapping) for r in rows]
+    finally:
+        db.close()
+
+
+@app.get("/admin/roster", response_class=HTMLResponse)
+async def admin_roster_get(
+    request: Request,
+    error: Optional[str] = None,
+    success: Optional[str] = None,
+    room: str = "",
+    student_id: str = "",
+    _: bool = Depends(require_admin),
+):
+    recent_students: list[dict] = []
+    table_error: Optional[str] = None
+    try:
+        recent_students = _load_recent_roster_students(limit=10)
+    except Exception:
+        table_error = "Roster tables are missing or not writable."
+
+    return templates.TemplateResponse(
+        "admin_roster.html",
+        {
+            "request": request,
+            "page_title": "Quick Add Student | Fluency Index",
+            "error": error or "",
+            "success": success or "",
+            "room": room,
+            "student_id": student_id,
+            "table_error": table_error,
+            "recent_students": recent_students,
+        },
+    )
+
+
+@app.post("/admin/roster/add", response_class=HTMLResponse)
+async def admin_roster_add(
+    request: Request,
+    room: str = Form(...),
+    student_id: str = Form(...),
+    _: bool = Depends(require_admin),
+):
+    normalized_room = room.strip().upper()
+    normalized_student_id = student_id.strip()
+
+    if not re.fullmatch(r"[A-Za-z][0-9]{2}", normalized_room):
+        return RedirectResponse(
+            url=f"/admin/roster?error={quote('Room must match format A01.')}&student_id={quote(normalized_student_id)}",
+            status_code=303,
+        )
+    if not re.fullmatch(r"[0-9]{6}", normalized_student_id):
+        return RedirectResponse(
+            url=f"/admin/roster?error={quote('Student ID must be exactly 6 digits.')}&room={quote(normalized_room)}",
+            status_code=303,
+        )
+
+    db = SessionLocal()
+    try:
+        _ensure_pilot_roster_tables(db)
+        _ensure_teacher_one(db)
+        teacher_id = 1
+        class_columns = _table_columns(db, "classes")
+        student_columns = _table_columns(db, "students")
+
+        class_row = db.execute(
+            text(
+                """
+                SELECT id
+                FROM classes
+                WHERE room_code = :room_code
+                LIMIT 1
+                """
+            ),
+            {"room_code": normalized_room},
+        ).first()
+        if class_row:
+            class_id = int(class_row.id)
+        else:
+            if "name" in class_columns:
+                inserted_class = db.execute(
+                    text(
+                        """
+                        INSERT INTO classes (teacher_id, name, room_code)
+                        VALUES (:teacher_id, :name, :room_code)
+                        RETURNING id
+                        """
+                    ),
+                    {"teacher_id": teacher_id, "name": normalized_room, "room_code": normalized_room},
+                ).first()
+            else:
+                inserted_class = db.execute(
+                    text(
+                        """
+                        INSERT INTO classes (teacher_id, room_code)
+                        VALUES (:teacher_id, :room_code)
+                        RETURNING id
+                        """
+                    ),
+                    {"teacher_id": teacher_id, "room_code": normalized_room},
+                ).first()
+            class_id = int(inserted_class.id)
+
+        existing_student = db.execute(
+            text(
+                """
+                SELECT id
+                FROM students
+                WHERE student_identifier = :student_identifier
+                LIMIT 1
+                """
+            ),
+            {"student_identifier": normalized_student_id},
+        ).first()
+        if existing_student:
+            db.rollback()
+            return RedirectResponse(
+                url=f"/admin/roster?error={quote('Student already exists.')}&room={quote(normalized_room)}",
+                status_code=303,
+            )
+
+        if "first_name" in student_columns and "last_name" in student_columns:
+            db.execute(
+                text(
+                    """
+                    INSERT INTO students (class_id, student_identifier, first_name, last_name, is_active)
+                    VALUES (:class_id, :student_identifier, :first_name, :last_name, :is_active)
+                    """
+                ),
+                {
+                    "class_id": class_id,
+                    "student_identifier": normalized_student_id,
+                    "first_name": "Pilot",
+                    "last_name": normalized_student_id,
+                    "is_active": True,
+                },
+            )
+        else:
+            db.execute(
+                text(
+                    """
+                    INSERT INTO students (class_id, student_identifier, is_active)
+                    VALUES (:class_id, :student_identifier, :is_active)
+                    """
+                ),
+                {
+                    "class_id": class_id,
+                    "student_identifier": normalized_student_id,
+                    "is_active": True,
+                },
+            )
+        db.commit()
+    except Exception:
+        db.rollback()
+        return templates.TemplateResponse(
+            "admin_roster.html",
+            {
+                "request": request,
+                "page_title": "Quick Add Student | Fluency Index",
+                "error": "Roster setup failed. Check table permissions/schema and retry.",
+                "success": "",
+                "room": normalized_room,
+                "student_id": normalized_student_id,
+                "table_error": None,
+                "recent_students": [],
+            },
+            status_code=500,
+        )
+    finally:
+        db.close()
+
+    return RedirectResponse(
+        url=f"/admin/roster?success={quote('Student added.')}&room={quote(normalized_room)}",
+        status_code=303,
     )
 
 
