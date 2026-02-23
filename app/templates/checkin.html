@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+
+{% block content %}
+<section class="auth-section">
+  <div class="auth-card">
+    <h1>Student Check-In</h1>
+    <p class="auth-intro">Enter your student ID to begin the test.</p>
+
+    {% if error %}
+    <p class="helper-text" style="color:#b91c1c;">{{ error }}</p>
+    {% endif %}
+
+    <form class="auth-form" method="post" action="/admin/test/checkin/start">
+      <label class="auth-field">
+        <span>Student ID</span>
+        <input type="text" name="student_id" inputmode="numeric" minlength="6" maxlength="6" required>
+      </label>
+      <button type="submit" class="btn-primary">Begin Test</button>
+    </form>
+  </div>
+</section>
+{% endblock %}

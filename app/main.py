@@ -7,6 +7,7 @@ import time
 from threading import Lock
 from email.message import EmailMessage
 from typing import Optional
+from urllib.parse import quote
 
 from fastapi import FastAPI, Request, Form, Query, BackgroundTasks, Depends, HTTPException, Header
 from fastapi.responses import HTMLResponse, PlainTextResponse, FileResponse, RedirectResponse
@@ -18,6 +19,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import text
 
 from .db import SessionLocal, WaitlistEntry, init_db  # NEW
+from .services.testing import CheckinError, start_session
 
 BASE_DIR = Path(__file__).resolve().parent  # app/
 
@@ -251,6 +253,30 @@ async def signup_get(request: Request):
     )
 
 
+@app.get("/test/checkin", response_class=HTMLResponse)
+async def test_checkin_page(request: Request, error: Optional[str] = None):
+    # TODO: Pilot flow uses /admin/test/checkin only.
+    raise HTTPException(status_code=404, detail="Not Found")
+
+
+@app.post("/test/checkin/start")
+async def test_checkin_start(student_id: str = Form(...)):
+    # TODO: Pilot flow uses /admin/test/checkin/start only.
+    raise HTTPException(status_code=404, detail="Not Found")
+
+
+@app.get("/test/run/{session_id}", response_class=HTMLResponse)
+async def run_test_page(session_id: int, request: Request):
+    return templates.TemplateResponse(
+        "test_run.html",
+        {
+            "request": request,
+            "page_title": "Fluency Test | Fluency Index",
+            "session_id": session_id,
+        },
+    )
+
+
 @app.get("/admin/login", response_class=HTMLResponse)
 async def admin_login_get(request: Request):
     return templates.TemplateResponse(
@@ -337,6 +363,34 @@ async def admin_home(request: Request, _: bool = Depends(require_admin)):
             "page_title": "Admin | Fluency Index",
         },
     )
+
+
+@app.get("/admin/test/checkin", response_class=HTMLResponse)
+async def admin_test_checkin_page(
+    request: Request,
+    error: Optional[str] = None,
+    _: bool = Depends(require_admin),
+):
+    return templates.TemplateResponse(
+        "checkin.html",
+        {
+            "request": request,
+            "page_title": "Student Check-In | Fluency Index",
+            "error": error or "",
+        },
+    )
+
+
+@app.post("/admin/test/checkin/start")
+async def admin_test_checkin_start(
+    student_id: str = Form(...),
+    _: bool = Depends(require_admin),
+):
+    try:
+        session_id = start_session(student_id)
+        return RedirectResponse(url=f"/test/run/{session_id}", status_code=303)
+    except CheckinError as e:
+        return RedirectResponse(url=f"/admin/test/checkin?error={quote(str(e))}", status_code=303)
 
 
 @app.get("/admin/sessions", response_class=HTMLResponse)
