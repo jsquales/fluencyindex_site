@@ -227,7 +227,19 @@ class Attempt(Base):
 
 def init_db() -> None:
     """Create all tables if they don't exist yet."""
-    _ = (WaitlistEntry, User, Class, Student, Session, Attempt)
+    from .models.game24 import Game24Attempt, Game24AttemptRow, Game24Puzzle
+
+    _ = (
+        WaitlistEntry,
+        User,
+        Class,
+        Student,
+        Session,
+        Attempt,
+        Game24Puzzle,
+        Game24Attempt,
+        Game24AttemptRow,
+    )
     with engine.begin() as connection:
         Base.metadata.create_all(bind=connection, checkfirst=True)
         if connection.dialect.name == "postgresql":

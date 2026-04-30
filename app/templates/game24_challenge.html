@@ -1,0 +1,199 @@
+{% extends "base.html" %}
+
+{% block content %}
+<section class="challenge-section">
+  <div class="challenge-card">
+    <div class="challenge-header">
+      <div>
+        <h1>24 Challenge</h1>
+        <p class="challenge-intro">Use each card value once across three rows to make 24.</p>
+      </div>
+    </div>
+
+    <div class="challenge-filter-row">
+      <div class="challenge-filter-help">
+        Choose a deck and difficulty, or leave either one on Random for a surprise puzzle.
+      </div>
+      <div class="challenge-filters" aria-label="Puzzle filters">
+        <label>
+          <span>Deck</span>
+          <select id="deck-filter">
+            <option value="">Random</option>
+            {% for variant in game24_options.variants %}
+            <option value="{{ variant.value }}">{{ variant.label }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <label>
+          <span>Difficulty</span>
+          <select id="difficulty-filter">
+            <option value="">Random</option>
+            {% for difficulty in game24_options.difficulties %}
+            <option value="{{ difficulty }}">{{ difficulty }}</option>
+            {% endfor %}
+          </select>
+        </label>
+      </div>
+    </div>
+
+    <div id="puzzle-status" class="challenge-status">Loading puzzle...</div>
+    <div id="number-cards" class="number-cards" aria-live="polite"></div>
+
+    <form id="challenge-form" class="challenge-form" autocomplete="off">
+      {% for row_number in [1, 2, 3] %}
+      <div class="challenge-row">
+        <span class="row-label">Row {{ row_number }}</span>
+        <input id="left-{{ row_number }}" name="left-{{ row_number }}" type="text" inputmode="decimal" autocomplete="off" autocapitalize="off" spellcheck="false" aria-label="Row {{ row_number }} left input">
+        <select id="op-{{ row_number }}" name="op-{{ row_number }}" aria-label="Row {{ row_number }} operator">
+          <option value="+">+</option>
+          <option value="-">-</option>
+          <option value="*">*</option>
+          <option value="/">/</option>
+        </select>
+        <input id="right-{{ row_number }}" name="right-{{ row_number }}" type="text" inputmode="decimal" autocomplete="off" autocapitalize="off" spellcheck="false" aria-label="Row {{ row_number }} right input">
+        <span class="equals-sign">=</span>
+        <input id="result-{{ row_number }}" name="result-{{ row_number }}" type="text" inputmode="decimal" autocomplete="off" autocapitalize="off" spellcheck="false" aria-label="Row {{ row_number }} result input" {% if row_number == 3 %}value="24"{% endif %}>
+      </div>
+      {% endfor %}
+
+      <div class="challenge-actions">
+        <button type="submit" class="btn-primary">Submit</button>
+      </div>
+    </form>
+
+    <div id="challenge-result" class="challenge-result" aria-live="polite"></div>
+    <div id="next-puzzle-actions" class="next-puzzle-actions" hidden>
+      <button type="button" id="new-puzzle-button" class="btn-secondary">New Puzzle</button>
+    </div>
+  </div>
+</section>
+
+<script>
+  const puzzleStatus = document.getElementById("puzzle-status");
+  const numberCards = document.getElementById("number-cards");
+  const challengeForm = document.getElementById("challenge-form");
+  const challengeResult = document.getElementById("challenge-result");
+  const newPuzzleButton = document.getElementById("new-puzzle-button");
+  const nextPuzzleActions = document.getElementById("next-puzzle-actions");
+  const deckFilter = document.getElementById("deck-filter");
+  const difficultyFilter = document.getElementById("difficulty-filter");
+
+  let currentPuzzle = null;
+  let startedAt = null;
+
+  function setResult(message, state) {
+    challengeResult.textContent = message;
+    challengeResult.className = `challenge-result ${state || ""}`.trim();
+  }
+
+  function showNextPuzzleButton() {
+    nextPuzzleActions.hidden = false;
+  }
+
+  function formatElapsedTime(responseTimeMs) {
+    const totalSeconds = Math.floor(responseTimeMs / 1000);
+    const minutes = Math.floor(totalSeconds / 60);
+    const seconds = String(totalSeconds % 60).padStart(2, "0");
+    return `${minutes}:${seconds}`;
+  }
+
+  function selectedPuzzleUrl() {
+    const params = new URLSearchParams();
+    if (deckFilter.value) {
+      params.set("variant", deckFilter.value);
+    }
+    if (difficultyFilter.value) {
+      params.set("difficulty", difficultyFilter.value);
+    }
+    const query = params.toString();
+    return `/api/v1/game24/random-puzzle${query ? `?${query}` : ""}`;
+  }
+
+  function rowPayload(rowNumber) {
+    return {
+      left: document.getElementById(`left-${rowNumber}`).value,
+      op: document.getElementById(`op-${rowNumber}`).value,
+      right: document.getElementById(`right-${rowNumber}`).value,
+      result: document.getElementById(`result-${rowNumber}`).value,
+    };
+  }
+
+  function resetRows() {
+    for (const rowNumber of [1, 2, 3]) {
+      document.getElementById(`left-${rowNumber}`).value = "";
+      document.getElementById(`op-${rowNumber}`).value = "+";
+      document.getElementById(`right-${rowNumber}`).value = "";
+      document.getElementById(`result-${rowNumber}`).value = rowNumber === 3 ? "24" : "";
+    }
+  }
+
+  async function loadPuzzle() {
+    puzzleStatus.textContent = "Loading puzzle...";
+    numberCards.innerHTML = "";
+    setResult("", "");
+    nextPuzzleActions.hidden = true;
+    resetRows();
+
+    try {
+      const response = await fetch(selectedPuzzleUrl());
+      if (!response.ok) {
+        throw new Error("No active puzzle found for those filters.");
+      }
+      currentPuzzle = await response.json();
+      startedAt = new Date();
+      puzzleStatus.textContent = `Puzzle #${currentPuzzle.id} - ${currentPuzzle.variant} - difficulty ${currentPuzzle.difficulty}`;
+      numberCards.innerHTML = currentPuzzle.numbers
+        .map((number) => `<div class="number-card">${number}</div>`)
+        .join("");
+    } catch (error) {
+      currentPuzzle = null;
+      puzzleStatus.textContent = error.message;
+    }
+  }
+
+  challengeForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    if (!currentPuzzle || !startedAt) {
+      setResult("Load a puzzle before submitting.", "incorrect");
+      return;
+    }
+
+    setResult("Checking...", "");
+    const payload = {
+      puzzle_id: currentPuzzle.id,
+      student_identifier: "manual_practice",
+      started_at: startedAt.toISOString(),
+      submitted_at: new Date().toISOString(),
+      rows: [rowPayload(1), rowPayload(2), rowPayload(3)],
+    };
+
+    try {
+      const response = await fetch("/api/v1/game24/submit", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const result = await response.json();
+      if (!response.ok) {
+        throw new Error(result.detail || "Submit failed.");
+      }
+      if (result.is_correct) {
+        setResult(`Correct. Time: ${formatElapsedTime(result.response_time_ms)}`, "correct");
+      } else {
+        const rowPrefix = result.row_number ? `Row ${result.row_number}: ` : "";
+        setResult(`Incorrect: ${rowPrefix}${result.error_message || result.error_code || "Try again."}`, "incorrect");
+      }
+      showNextPuzzleButton();
+    } catch (error) {
+      setResult(error.message, "incorrect");
+      showNextPuzzleButton();
+    }
+  });
+
+  newPuzzleButton.addEventListener("click", loadPuzzle);
+  deckFilter.addEventListener("change", loadPuzzle);
+  difficultyFilter.addEventListener("change", loadPuzzle);
+
+  loadPuzzle();
+</script>
+{% endblock %}

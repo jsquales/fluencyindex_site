@@ -104,6 +104,32 @@ body {
   color: var(--text-muted);
 }
 
+/* Practice preview */
+
+.practice-preview {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 3px 10px rgba(15, 23, 42, 0.04);
+  padding: 1.1rem 1.25rem;
+  margin-bottom: 1.5rem;
+}
+
+.practice-preview h2 {
+  margin: 0 0 0.25rem;
+  font-size: 1.1rem;
+}
+
+.practice-preview p {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 0.95rem;
+}
+
 /* Buttons */
 
 .btn-primary,
@@ -271,6 +297,172 @@ body {
   color: var(--text-muted);
 }
 
+/* 24 Challenge */
+
+.challenge-section {
+  margin-top: 1.5rem;
+}
+
+.challenge-card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-soft);
+  padding: 1.5rem;
+}
+
+.challenge-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.challenge-header h1 {
+  margin: 0 0 0.35rem;
+  font-size: 1.75rem;
+}
+
+.challenge-intro,
+.challenge-status {
+  color: var(--text-muted);
+  margin: 0;
+}
+
+.challenge-filter-row {
+  display: grid;
+  grid-template-columns: minmax(220px, 320px) auto;
+  gap: 0.75rem;
+  justify-content: center;
+  align-items: end;
+  margin: 0.9rem 0 1rem;
+}
+
+.challenge-filter-help {
+  background: #f8fafc;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text-muted);
+  font-size: 0.9rem;
+  line-height: 1.35;
+  padding: 0.65rem 0.75rem;
+}
+
+.challenge-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.challenge-filters label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  color: var(--text-muted);
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.challenge-filters select {
+  min-width: 150px;
+  min-height: 40px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.4rem 0.55rem;
+  font: inherit;
+  background: #ffffff;
+  color: var(--text-main);
+}
+
+.number-cards {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(64px, 1fr));
+  gap: 0.75rem;
+  max-width: 420px;
+  margin: 1rem auto 1.25rem;
+}
+
+.number-card {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 72px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: #f8fafc;
+  font-size: 2rem;
+  font-weight: 700;
+}
+
+.challenge-form {
+  display: grid;
+  gap: 0.75rem;
+  max-width: 680px;
+  margin: 0 auto;
+}
+
+.challenge-row {
+  display: grid;
+  grid-template-columns: 64px 96px 64px 96px 24px 96px;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.row-label {
+  color: var(--text-muted);
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.challenge-row input,
+.challenge-row select {
+  width: 100%;
+  min-height: 42px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.45rem 0.55rem;
+  font: inherit;
+  background: #ffffff;
+}
+
+.challenge-row input:focus,
+.challenge-row select:focus {
+  outline: none;
+  border-color: var(--primary);
+  box-shadow: 0 0 0 1px rgba(37, 99, 235, 0.1);
+}
+
+.equals-sign {
+  text-align: center;
+  color: var(--text-muted);
+  font-weight: 700;
+}
+
+.challenge-actions {
+  margin-top: 0.5rem;
+  text-align: center;
+}
+
+.challenge-result {
+  min-height: 1.5rem;
+  margin-top: 1rem;
+  font-weight: 700;
+}
+
+.challenge-result.correct {
+  color: var(--accent);
+}
+
+.challenge-result.incorrect {
+  color: #dc2626;
+}
+
+.next-puzzle-actions {
+  margin-top: 0.75rem;
+  text-align: center;
+}
+
 
 /* Responsiveness */
 
@@ -287,5 +479,32 @@ body {
 
   .hero-text h1 {
     font-size: 1.5rem;
+  }
+
+  .practice-preview {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .challenge-header {
+    flex-direction: column;
+  }
+
+  .challenge-filter-row {
+    grid-template-columns: 1fr;
+  }
+
+  .number-cards {
+    grid-template-columns: repeat(4, minmax(52px, 1fr));
+  }
+
+  .challenge-row {
+    grid-template-columns: 1fr 64px 1fr;
+  }
+
+  .challenge-row .row-label,
+  .challenge-row .equals-sign {
+    grid-column: 1 / -1;
+    text-align: left;
   }
 }

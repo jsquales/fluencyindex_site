@@ -21,11 +21,14 @@ from pydantic import BaseModel, Field
 from sqlalchemy import text
 
 from .db import SessionLocal, WaitlistEntry, init_db  # NEW
+from .routes.game24 import router as game24_router
+from .services.game24_service import get_game24_options_response
 from .services.testing import CheckinError, start_session
 
 BASE_DIR = Path(__file__).resolve().parent  # app/
 
 app = FastAPI()
+app.include_router(game24_router)
 
 app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
 templates = Jinja2Templates(directory=BASE_DIR / "templates")
@@ -256,6 +259,23 @@ async def signup_get(request: Request):
             "page_title": "Get Early Access | Fluency Index"
         }
     )
+
+
+@app.get("/24-challenge", response_class=HTMLResponse)
+async def game24_challenge_page(request: Request):
+    db = SessionLocal()
+    try:
+        options = get_game24_options_response(db)
+        return templates.TemplateResponse(
+            "game24_challenge.html",
+            {
+                "request": request,
+                "page_title": "24 Challenge | Fluency Index",
+                "game24_options": options,
+            },
+        )
+    finally:
+        db.close()
 
 
 @app.get("/test/checkin", response_class=HTMLResponse)
