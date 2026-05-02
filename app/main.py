@@ -22,6 +22,7 @@ from sqlalchemy import text
 
 from .db import SessionLocal, WaitlistEntry, init_db  # NEW
 from .routes.game24 import router as game24_router
+from .routes.schwab import router as schwab_router
 from .services.game24_service import get_game24_options_response
 from .services.testing import CheckinError, start_session
 
@@ -29,6 +30,7 @@ BASE_DIR = Path(__file__).resolve().parent  # app/
 
 app = FastAPI()
 app.include_router(game24_router)
+app.include_router(schwab_router)
 
 app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
 templates = Jinja2Templates(directory=BASE_DIR / "templates")
