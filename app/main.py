@@ -6,6 +6,7 @@ import secrets
 import smtplib
 import ssl
 import time
+from datetime import datetime, timezone
 from threading import Lock
 from email.message import EmailMessage
 from typing import Optional
@@ -20,7 +21,7 @@ from passlib.context import CryptContext
 from pydantic import BaseModel, Field
 from sqlalchemy import text
 
-from .db import SessionLocal, WaitlistEntry, init_db  # NEW
+from .db import SchwabToken, SessionLocal, WaitlistEntry, init_db  # NEW
 from .routes.game24 import router as game24_router
 from .routes.schwab import router as schwab_router
 from .services.game24_service import get_game24_options_response
@@ -985,6 +986,61 @@ async def admin_sessions(request: Request, _: bool = Depends(require_admin)):
             "page_title": "Recent Math Rush Sessions",
         }
     )
+
+
+@app.get("/admin/schwab/token", response_class=HTMLResponse)
+async def admin_schwab_token_status(_: bool = Depends(require_admin)):
+    db = SessionLocal()
+    try:
+        token = (
+            db.query(SchwabToken)
+            .order_by(SchwabToken.created_at.desc())
+            .first()
+        )
+    finally:
+        db.close()
+
+    if not token:
+        return HTMLResponse(
+            """
+            <!doctype html>
+            <html lang="en">
+              <head><meta charset="utf-8"><title>Schwab Token Status</title></head>
+              <body>
+                <h1>Schwab Token Status</h1>
+                <p>Token exists: No</p>
+              </body>
+            </html>
+            """
+        )
+
+    now = datetime.now(timezone.utc)
+    expires_at = _as_aware_utc(token.expires_at)
+    is_expired = expires_at is not None and expires_at <= now
+
+    return HTMLResponse(
+        f"""
+        <!doctype html>
+        <html lang="en">
+          <head><meta charset="utf-8"><title>Schwab Token Status</title></head>
+          <body>
+            <h1>Schwab Token Status</h1>
+            <p>Token exists: Yes</p>
+            <p>Created at: {token.created_at}</p>
+            <p>Expires at: {token.expires_at or "Unknown"}</p>
+            <p>Status: {"Expired" if is_expired else "Not expired"}</p>
+          </body>
+        </html>
+        """
+    )
+
+
+def _as_aware_utc(value: datetime | None) -> datetime | None:
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
 
 
 @app.get("/admin/sessions/{device_id}/{client_session_id}", response_class=HTMLResponse)

@@ -1,5 +1,5 @@
 import os
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum as PyEnum
 from typing import List
 
@@ -225,6 +225,23 @@ class Attempt(Base):
     student: Mapped["Student"] = relationship(back_populates="attempts")
 
 
+class SchwabToken(Base):
+    __tablename__ = "schwab_tokens"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    access_token: Mapped[str] = mapped_column(Text, nullable=False)
+    refresh_token: Mapped[str | None] = mapped_column(Text, nullable=True)
+    token_type: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    expires_in: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    scope: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
 def init_db() -> None:
     """Create all tables if they don't exist yet."""
     from .models.game24 import Game24Attempt, Game24AttemptRow, Game24Puzzle
@@ -236,6 +253,7 @@ def init_db() -> None:
         Student,
         Session,
         Attempt,
+        SchwabToken,
         Game24Puzzle,
         Game24Attempt,
         Game24AttemptRow,
