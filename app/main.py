@@ -990,6 +990,15 @@ async def admin_sessions(request: Request, _: bool = Depends(require_admin)):
 
 @app.get("/admin/schwab/token", response_class=HTMLResponse)
 async def admin_schwab_token_status(_: bool = Depends(require_admin)):
+    return _render_schwab_token_status()
+
+
+@app.get("/admin/schwab-status", response_class=HTMLResponse)
+async def admin_schwab_status(_: bool = Depends(require_admin)):
+    return _render_schwab_token_status()
+
+
+def _render_schwab_token_status() -> HTMLResponse:
     db = SessionLocal()
     try:
         token = (
@@ -1008,7 +1017,8 @@ async def admin_schwab_token_status(_: bool = Depends(require_admin)):
               <head><meta charset="utf-8"><title>Schwab Token Status</title></head>
               <body>
                 <h1>Schwab Token Status</h1>
-                <p>Token exists: No</p>
+                <p>No token stored</p>
+                <p>Token exists: false</p>
               </body>
             </html>
             """
@@ -1025,10 +1035,10 @@ async def admin_schwab_token_status(_: bool = Depends(require_admin)):
           <head><meta charset="utf-8"><title>Schwab Token Status</title></head>
           <body>
             <h1>Schwab Token Status</h1>
-            <p>Token exists: Yes</p>
+            <p>Token exists: true</p>
             <p>Created at: {token.created_at}</p>
             <p>Expires at: {token.expires_at or "Unknown"}</p>
-            <p>Status: {"Expired" if is_expired else "Not expired"}</p>
+            <p>Expired: {str(is_expired).lower()}</p>
           </body>
         </html>
         """
