@@ -22,10 +22,11 @@ from passlib.context import CryptContext
 from pydantic import BaseModel, Field
 from sqlalchemy import text
 
-from .db import SchwabToken, SessionLocal, WaitlistEntry, init_db  # NEW
+from .db import SessionLocal, WaitlistEntry, init_db  # NEW
 from .routes.game24 import router as game24_router
 from .routes.schwab import router as schwab_router
 from .services.game24_service import get_game24_options_response
+from .services.schwab_token_service import get_latest_schwab_token, refresh_access_token_if_needed
 from .services.testing import CheckinError, start_session
 
 BASE_DIR = Path(__file__).resolve().parent  # app/
@@ -1007,17 +1008,22 @@ async def admin_schwab_status_typo(_: bool = Depends(require_admin)):
 
 @app.get("/admin/schwab-api-test", response_class=HTMLResponse)
 async def admin_schwab_api_test(_: bool = Depends(require_admin)):
-    token = _get_latest_schwab_token()
+    refresh_result = await refresh_access_token_if_needed()
+    token = refresh_result.token
 
     if not token:
         return HTMLResponse(
-            """
+            f"""
             <!doctype html>
             <html lang="en">
               <head><meta charset="utf-8"><title>Schwab API Test</title></head>
               <body>
                 <h1>Schwab API Test</h1>
                 <p>No Schwab token stored.</p>
+                <p>Token refresh attempted: {str(refresh_result.refresh_attempted).lower()}</p>
+                <p>Token refresh succeeded: {str(refresh_result.refresh_succeeded).lower()}</p>
+                <p>API request: skipped</p>
+                <p>HTTP status: Unavailable</p>
               </body>
             </html>
             """
@@ -1026,19 +1032,23 @@ async def admin_schwab_api_test(_: bool = Depends(require_admin)):
     expires_at = _as_aware_utc(token.expires_at)
     if expires_at is None or expires_at <= datetime.now(timezone.utc):
         return HTMLResponse(
-            """
+            f"""
             <!doctype html>
             <html lang="en">
               <head><meta charset="utf-8"><title>Schwab API Test</title></head>
               <body>
                 <h1>Schwab API Test</h1>
                 <p>Token expired; refresh needed.</p>
+                <p>Token refresh attempted: {str(refresh_result.refresh_attempted).lower()}</p>
+                <p>Token refresh succeeded: {str(refresh_result.refresh_succeeded).lower()}</p>
+                <p>API request: skipped</p>
+                <p>HTTP status: Unavailable</p>
               </body>
             </html>
             """
         )
 
-    status_text = "Request failed"
+    api_request_status = "failed"
     http_status = "Unavailable"
     last_price = "Unavailable"
 
@@ -1054,10 +1064,10 @@ async def admin_schwab_api_test(_: bool = Depends(require_admin)):
             )
         http_status = str(response.status_code)
         if 200 <= response.status_code < 300:
-            status_text = "Request succeeded"
+            api_request_status = "succeeded"
             last_price = _extract_quote_last_price(response.json(), "SPY")
     except Exception:
-        status_text = "Request failed"
+        api_request_status = "failed"
 
     return HTMLResponse(
         f"""
@@ -1066,7 +1076,9 @@ async def admin_schwab_api_test(_: bool = Depends(require_admin)):
           <head><meta charset="utf-8"><title>Schwab API Test</title></head>
           <body>
             <h1>Schwab API Test</h1>
-            <p>Result: {status_text}</p>
+            <p>Token refresh attempted: {str(refresh_result.refresh_attempted).lower()}</p>
+            <p>Token refresh succeeded: {str(refresh_result.refresh_succeeded).lower()}</p>
+            <p>API request: {api_request_status}</p>
             <p>HTTP status: {http_status}</p>
             <p>Endpoint used: {SCHWAB_QUOTE_TEST_ENDPOINT}</p>
             <p>Symbol: SPY</p>
@@ -1078,7 +1090,7 @@ async def admin_schwab_api_test(_: bool = Depends(require_admin)):
 
 
 def _render_schwab_token_status() -> HTMLResponse:
-    token = _get_latest_schwab_token()
+    token = get_latest_schwab_token()
 
     if not token:
         return HTMLResponse(
@@ -1114,18 +1126,6 @@ def _render_schwab_token_status() -> HTMLResponse:
         </html>
         """
     )
-
-
-def _get_latest_schwab_token() -> Optional[SchwabToken]:
-    db = SessionLocal()
-    try:
-        return (
-            db.query(SchwabToken)
-            .order_by(SchwabToken.created_at.desc())
-            .first()
-        )
-    finally:
-        db.close()
 
 
 def _as_aware_utc(value: datetime | None) -> datetime | None:

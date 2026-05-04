@@ -1,20 +1,18 @@
-import base64
 import logging
-import os
-from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-import httpx
 from fastapi import APIRouter, Query
 from fastapi.responses import HTMLResponse
 
-from ..db import SchwabToken, SessionLocal
+from ..services.schwab_token_service import (
+    MissingSchwabConfigError,
+    SchwabTokenExchangeError,
+    exchange_authorization_code,
+)
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/schwab", tags=["schwab"])
-
-SCHWAB_TOKEN_URL = "https://api.schwabapi.com/v1/oauth/token"
 
 
 def _simple_page(title: str, message: str) -> HTMLResponse:
@@ -84,8 +82,7 @@ async def schwab_callback(
         )
 
     try:
-        token_payload = await _exchange_code_for_tokens(code)
-        _store_tokens(token_payload)
+        await exchange_authorization_code(code)
     except MissingSchwabConfigError:
         logger.error("Schwab OAuth callback could not exchange code because server configuration is incomplete.")
         return _simple_page(
@@ -110,85 +107,3 @@ async def schwab_callback(
         "Schwab Authorization Complete",
         "Schwab authorization was completed and stored securely. You may close this window.",
     )
-
-
-async def _exchange_code_for_tokens(code: str) -> dict:
-    app_key = os.getenv("SCHWAB_APP_KEY")
-    app_secret = os.getenv("SCHWAB_APP_SECRET")
-    callback_url = os.getenv("SCHWAB_CALLBACK_URL")
-
-    if not app_key or not app_secret or not callback_url:
-        raise MissingSchwabConfigError()
-
-    credentials = f"{app_key}:{app_secret}".encode("utf-8")
-    basic_auth = base64.b64encode(credentials).decode("ascii")
-    headers = {
-        "Authorization": f"Basic {basic_auth}",
-        "Content-Type": "application/x-www-form-urlencoded",
-    }
-    data = {
-        "grant_type": "authorization_code",
-        "code": code,
-        "redirect_uri": callback_url,
-    }
-
-    async with httpx.AsyncClient(timeout=20.0) as client:
-        response = await client.post(SCHWAB_TOKEN_URL, headers=headers, data=data)
-
-    if response.status_code != 200:
-        raise SchwabTokenExchangeError()
-
-    payload = response.json()
-    if not payload.get("access_token"):
-        raise SchwabTokenExchangeError()
-
-    return payload
-
-
-def _store_tokens(payload: dict) -> None:
-    now = datetime.now(timezone.utc)
-    expires_in = _safe_int(payload.get("expires_in"))
-    expires_at = now + timedelta(seconds=expires_in) if expires_in is not None else None
-
-    token = SchwabToken(
-        access_token=str(payload["access_token"]),
-        refresh_token=_optional_string(payload.get("refresh_token")),
-        token_type=_optional_string(payload.get("token_type")),
-        expires_in=expires_in,
-        scope=_optional_string(payload.get("scope")),
-        created_at=now,
-        expires_at=expires_at,
-    )
-
-    db = SessionLocal()
-    try:
-        db.add(token)
-        db.commit()
-    except Exception:
-        db.rollback()
-        raise
-    finally:
-        db.close()
-
-
-def _safe_int(value: object) -> int | None:
-    if value is None:
-        return None
-    try:
-        return int(value)
-    except (TypeError, ValueError):
-        return None
-
-
-def _optional_string(value: object) -> str | None:
-    if value is None:
-        return None
-    return str(value)
-
-
-class MissingSchwabConfigError(Exception):
-    pass
-
-
-class SchwabTokenExchangeError(Exception):
-    pass
