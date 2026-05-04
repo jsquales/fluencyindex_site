@@ -998,6 +998,11 @@ async def admin_schwab_status(_: bool = Depends(require_admin)):
     return _render_schwab_token_status()
 
 
+@app.get("/admin/schwab-statu", response_class=HTMLResponse)
+async def admin_schwab_status_typo(_: bool = Depends(require_admin)):
+    return RedirectResponse(url="/admin/schwab-status", status_code=303)
+
+
 def _render_schwab_token_status() -> HTMLResponse:
     db = SessionLocal()
     try:
