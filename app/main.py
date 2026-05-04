@@ -1123,13 +1123,15 @@ async def admin_schwab_options_test(
 
     api_request_status = "failed"
     http_status = "Unavailable"
+    request_url = _build_schwab_options_request_url(normalized_symbol)
     chain_summary = _empty_options_summary()
 
     try:
+        request_params = _build_schwab_options_request_params(normalized_symbol)
         async with httpx.AsyncClient(timeout=20.0) as client:
             response = await client.get(
                 SCHWAB_OPTIONS_TEST_ENDPOINT,
-                params={"symbol": normalized_symbol, "contractType": "ALL"},
+                params=request_params,
                 headers={
                     "Accept": "application/json",
                     "Authorization": f"Bearer {token.access_token}",
@@ -1149,6 +1151,7 @@ async def admin_schwab_options_test(
         message="",
         refresh_attempted=refresh_result.refresh_attempted,
         refresh_succeeded=refresh_result.refresh_succeeded,
+        request_url=request_url,
         call_expiration_count=chain_summary["call_expiration_count"],
         put_expiration_count=chain_summary["put_expiration_count"],
         first_expiration=chain_summary["first_expiration"],
@@ -1237,6 +1240,22 @@ def _empty_options_summary() -> dict:
         "call_rows": [],
         "put_rows": [],
     }
+
+
+def _build_schwab_options_request_params(symbol: str) -> dict[str, str]:
+    return {
+        "symbol": symbol,
+        "contractType": "ALL",
+        "strategy": "SINGLE",
+        "strikeCount": "10",
+        "includeUnderlyingQuote": "false",
+    }
+
+
+def _build_schwab_options_request_url(symbol: str) -> str:
+    params = _build_schwab_options_request_params(symbol)
+    query_string = "&".join(f"{key}={quote(value)}" for key, value in params.items())
+    return f"{SCHWAB_OPTIONS_TEST_ENDPOINT}?{query_string}"
 
 
 def _summarize_option_chain(payload: object) -> dict:
@@ -1330,6 +1349,7 @@ def _render_schwab_options_test_page(
     message: str,
     refresh_attempted: bool,
     refresh_succeeded: bool,
+    request_url: str | None = None,
     call_expiration_count: int = 0,
     put_expiration_count: int = 0,
     first_expiration: str = "Unavailable",
@@ -1340,6 +1360,7 @@ def _render_schwab_options_test_page(
     put_rows = put_rows or []
     safe_symbol = html.escape(symbol)
     safe_message = html.escape(message)
+    safe_request_url = html.escape(request_url or _build_schwab_options_request_url(symbol))
 
     return HTMLResponse(
         f"""
@@ -1363,6 +1384,7 @@ def _render_schwab_options_test_page(
             <p>API request: {html.escape(api_request_status)}</p>
             <p>HTTP status: {html.escape(http_status)}</p>
             <p>Endpoint used: {SCHWAB_OPTIONS_TEST_ENDPOINT}</p>
+            <p>Final request URL: {safe_request_url}</p>
             <p>Symbol: {safe_symbol}</p>
             <p>Call expirations returned: {call_expiration_count}</p>
             <p>Put expirations returned: {put_expiration_count}</p>
