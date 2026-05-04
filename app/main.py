@@ -1160,6 +1160,73 @@ async def admin_schwab_options_test(
     )
 
 
+@app.get("/admin/schwab-spread-candidates", response_class=HTMLResponse)
+async def admin_schwab_spread_candidates(
+    symbol: str = Query(default="SPY", min_length=1, max_length=16),
+    _: bool = Depends(require_admin),
+):
+    normalized_symbol = _normalize_market_symbol(symbol)
+    refresh_result = await refresh_access_token_if_needed()
+    token = refresh_result.token
+
+    if not token:
+        return _render_schwab_spread_candidates_page(
+            symbol=normalized_symbol,
+            api_request_status="skipped",
+            http_status="Unavailable",
+            message="No Schwab token stored.",
+            refresh_attempted=refresh_result.refresh_attempted,
+            refresh_succeeded=refresh_result.refresh_succeeded,
+        )
+
+    expires_at = _as_aware_utc(token.expires_at)
+    if expires_at is None or expires_at <= datetime.now(timezone.utc):
+        return _render_schwab_spread_candidates_page(
+            symbol=normalized_symbol,
+            api_request_status="skipped",
+            http_status="Unavailable",
+            message="Token expired; refresh needed.",
+            refresh_attempted=refresh_result.refresh_attempted,
+            refresh_succeeded=refresh_result.refresh_succeeded,
+        )
+
+    api_request_status = "failed"
+    http_status = "Unavailable"
+    request_url = _build_schwab_options_request_url(normalized_symbol, strike_count="20")
+    candidate_summary = _empty_spread_candidate_summary()
+
+    try:
+        request_params = _build_schwab_options_request_params(normalized_symbol, strike_count="20")
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            response = await client.get(
+                SCHWAB_OPTIONS_TEST_ENDPOINT,
+                params=request_params,
+                headers={
+                    "Accept": "application/json",
+                    "Authorization": f"Bearer {token.access_token}",
+                },
+            )
+        http_status = str(response.status_code)
+        if 200 <= response.status_code < 300:
+            api_request_status = "succeeded"
+            candidate_summary = _find_spread_candidates(response.json())
+    except Exception:
+        api_request_status = "failed"
+
+    return _render_schwab_spread_candidates_page(
+        symbol=normalized_symbol,
+        api_request_status=api_request_status,
+        http_status=http_status,
+        message="",
+        refresh_attempted=refresh_result.refresh_attempted,
+        refresh_succeeded=refresh_result.refresh_succeeded,
+        request_url=request_url,
+        expiration=candidate_summary["expiration"],
+        put_candidates=candidate_summary["put_candidates"],
+        call_candidates=candidate_summary["call_candidates"],
+    )
+
+
 def _render_schwab_token_status() -> HTMLResponse:
     token = get_latest_schwab_token()
 
@@ -1242,18 +1309,18 @@ def _empty_options_summary() -> dict:
     }
 
 
-def _build_schwab_options_request_params(symbol: str) -> dict[str, str]:
+def _build_schwab_options_request_params(symbol: str, strike_count: str = "10") -> dict[str, str]:
     return {
         "symbol": symbol,
         "contractType": "ALL",
         "strategy": "SINGLE",
-        "strikeCount": "10",
+        "strikeCount": strike_count,
         "includeUnderlyingQuote": "false",
     }
 
 
-def _build_schwab_options_request_url(symbol: str) -> str:
-    params = _build_schwab_options_request_params(symbol)
+def _build_schwab_options_request_url(symbol: str, strike_count: str = "10") -> str:
+    params = _build_schwab_options_request_params(symbol, strike_count=strike_count)
     query_string = "&".join(f"{key}={quote(value)}" for key, value in params.items())
     return f"{SCHWAB_OPTIONS_TEST_ENDPOINT}?{query_string}"
 
@@ -1279,6 +1346,166 @@ def _summarize_option_chain(payload: object) -> dict:
         "call_rows": _sample_option_rows(call_map, first_expiration_key),
         "put_rows": _sample_option_rows(put_map, first_expiration_key),
     }
+
+
+def _empty_spread_candidate_summary() -> dict:
+    return {
+        "expiration": "Unavailable",
+        "put_candidates": [],
+        "call_candidates": [],
+    }
+
+
+def _find_spread_candidates(payload: object) -> dict:
+    if not isinstance(payload, dict):
+        return _empty_spread_candidate_summary()
+
+    call_map = payload.get("callExpDateMap")
+    put_map = payload.get("putExpDateMap")
+    if not isinstance(call_map, dict):
+        call_map = {}
+    if not isinstance(put_map, dict):
+        put_map = {}
+
+    expiration_key = _first_expiration_key(call_map, put_map)
+    if not expiration_key:
+        return _empty_spread_candidate_summary()
+
+    calls = _contracts_for_expiration(call_map, expiration_key)
+    puts = _contracts_for_expiration(put_map, expiration_key)
+
+    return {
+        "expiration": _clean_expiration(expiration_key),
+        "put_candidates": _find_put_spread_candidates(_clean_expiration(expiration_key), puts),
+        "call_candidates": _find_call_spread_candidates(_clean_expiration(expiration_key), calls),
+    }
+
+
+def _contracts_for_expiration(expiration_map: dict, expiration_key: str) -> list[dict]:
+    strike_map = expiration_map.get(expiration_key)
+    if not isinstance(strike_map, dict):
+        return []
+
+    contracts: list[dict] = []
+    for strike_key in sorted(strike_map.keys(), key=_strike_sort_key):
+        strike_contracts = strike_map.get(strike_key)
+        if not isinstance(strike_contracts, list) or not strike_contracts:
+            continue
+
+        contract = strike_contracts[0]
+        if isinstance(contract, dict):
+            contracts.append(contract)
+
+    return contracts
+
+
+def _find_put_spread_candidates(expiration: str, puts: list[dict]) -> list[dict[str, str]]:
+    candidates: list[dict[str, str]] = []
+    liquid_puts = [contract for contract in puts if _contract_is_liquid(contract)]
+
+    for short_leg in liquid_puts:
+        short_delta = _safe_float(short_leg.get("delta"))
+        short_strike = _safe_float(short_leg.get("strikePrice"))
+        short_bid = _safe_float(short_leg.get("bid"))
+        if short_delta is None or short_strike is None or short_bid is None:
+            continue
+        if not (-0.15 <= short_delta <= -0.08):
+            continue
+
+        long_legs = [
+            contract for contract in liquid_puts
+            if (_safe_float(contract.get("strikePrice")) is not None
+                and _safe_float(contract.get("strikePrice")) < short_strike)
+        ]
+        for long_leg in sorted(long_legs, key=lambda contract: _safe_float(contract.get("strikePrice")) or 0.0, reverse=True):
+            candidate = _build_spread_candidate(expiration, short_leg, long_leg)
+            if candidate:
+                candidates.append(candidate)
+                break
+
+        if len(candidates) >= 10:
+            break
+
+    return candidates
+
+
+def _find_call_spread_candidates(expiration: str, calls: list[dict]) -> list[dict[str, str]]:
+    candidates: list[dict[str, str]] = []
+    liquid_calls = [contract for contract in calls if _contract_is_liquid(contract)]
+
+    for short_leg in liquid_calls:
+        short_delta = _safe_float(short_leg.get("delta"))
+        short_strike = _safe_float(short_leg.get("strikePrice"))
+        short_bid = _safe_float(short_leg.get("bid"))
+        if short_delta is None or short_strike is None or short_bid is None:
+            continue
+        if not (0.08 <= short_delta <= 0.15):
+            continue
+
+        long_legs = [
+            contract for contract in liquid_calls
+            if (_safe_float(contract.get("strikePrice")) is not None
+                and _safe_float(contract.get("strikePrice")) > short_strike)
+        ]
+        for long_leg in sorted(long_legs, key=lambda contract: _safe_float(contract.get("strikePrice")) or 0.0):
+            candidate = _build_spread_candidate(expiration, short_leg, long_leg)
+            if candidate:
+                candidates.append(candidate)
+                break
+
+        if len(candidates) >= 10:
+            break
+
+    return candidates
+
+
+def _build_spread_candidate(expiration: str, short_leg: dict, long_leg: dict) -> dict[str, str] | None:
+    short_strike = _safe_float(short_leg.get("strikePrice"))
+    long_strike = _safe_float(long_leg.get("strikePrice"))
+    short_bid = _safe_float(short_leg.get("bid"))
+    long_ask = _safe_float(long_leg.get("ask"))
+    if short_strike is None or long_strike is None or short_bid is None or long_ask is None:
+        return None
+
+    width = abs(short_strike - long_strike)
+    credit = short_bid - long_ask
+    if width <= 0 or credit <= 0:
+        return None
+
+    credit_to_width = credit / width
+    if credit_to_width < 0.35:
+        return None
+
+    return {
+        "expiration": expiration,
+        "short_strike": f"{short_strike:0.2f}",
+        "long_strike": f"{long_strike:0.2f}",
+        "width": f"{width:0.2f}",
+        "credit": f"{credit:0.2f}",
+        "credit_to_width": f"{credit_to_width:0.2f}",
+        "short_delta": _format_option_value(short_leg.get("delta")),
+        "short_volume": _format_option_value(short_leg.get("totalVolume", short_leg.get("volume"))),
+        "short_open_interest": _format_option_value(short_leg.get("openInterest")),
+        "long_open_interest": _format_option_value(long_leg.get("openInterest")),
+    }
+
+
+def _contract_is_liquid(contract: dict) -> bool:
+    open_interest = _safe_float(contract.get("openInterest"))
+    bid = _safe_float(contract.get("bid"))
+    ask = _safe_float(contract.get("ask"))
+    if open_interest is None or bid is None or ask is None:
+        return False
+    return open_interest >= 500 and 0 <= ask - bid <= 0.10
+
+
+def _safe_float(value: object) -> float | None:
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def _first_expiration_key(call_map: dict, put_map: dict) -> str | None:
@@ -1399,6 +1626,64 @@ def _render_schwab_options_test_page(
     )
 
 
+def _render_schwab_spread_candidates_page(
+    *,
+    symbol: str,
+    api_request_status: str,
+    http_status: str,
+    message: str,
+    refresh_attempted: bool,
+    refresh_succeeded: bool,
+    request_url: str | None = None,
+    expiration: str = "Unavailable",
+    put_candidates: list[dict[str, str]] | None = None,
+    call_candidates: list[dict[str, str]] | None = None,
+) -> HTMLResponse:
+    put_candidates = put_candidates or []
+    call_candidates = call_candidates or []
+    safe_symbol = html.escape(symbol)
+    safe_message = html.escape(message)
+    safe_request_url = html.escape(request_url or _build_schwab_options_request_url(symbol, strike_count="20"))
+    no_candidates_message = ""
+    if not put_candidates and not call_candidates and not safe_message:
+        no_candidates_message = "<p>No candidates passed current filters.</p>"
+
+    return HTMLResponse(
+        f"""
+        <!doctype html>
+        <html lang="en">
+          <head>
+            <meta charset="utf-8">
+            <title>Schwab Spread Candidates</title>
+            <style>
+              body {{ font-family: Arial, sans-serif; margin: 32px; }}
+              table {{ border-collapse: collapse; margin: 12px 0 24px; min-width: 880px; }}
+              th, td {{ border: 1px solid #d0d7de; padding: 6px 8px; text-align: right; }}
+              th:first-child, td:first-child {{ text-align: left; }}
+            </style>
+          </head>
+          <body>
+            <h1>Schwab Spread Candidates</h1>
+            <p><strong>Educational/research preview only. Not trading advice.</strong></p>
+            {f"<p>{safe_message}</p>" if safe_message else ""}
+            <p>Token refresh attempted: {str(refresh_attempted).lower()}</p>
+            <p>Token refresh succeeded: {str(refresh_succeeded).lower()}</p>
+            <p>API request: {html.escape(api_request_status)}</p>
+            <p>HTTP status: {html.escape(http_status)}</p>
+            <p>Final request URL: {safe_request_url}</p>
+            <p>Symbol: {safe_symbol}</p>
+            <p>Nearest expiration used: {html.escape(expiration)}</p>
+            {no_candidates_message}
+            <h2>Put Spread Candidates</h2>
+            {_render_spread_candidate_rows(put_candidates)}
+            <h2>Call Spread Candidates</h2>
+            {_render_spread_candidate_rows(call_candidates)}
+          </body>
+        </html>
+        """
+    )
+
+
 def _render_option_rows(rows: list[dict[str, str]]) -> str:
     if not rows:
         return "<p>No contracts available.</p>"
@@ -1427,6 +1712,47 @@ def _render_option_rows(rows: list[dict[str, str]]) -> str:
           <th>Delta</th>
           <th>Volume</th>
           <th>Open Interest</th>
+        </tr>
+      </thead>
+      <tbody>{body}</tbody>
+    </table>
+    """
+
+
+def _render_spread_candidate_rows(rows: list[dict[str, str]]) -> str:
+    if not rows:
+        return "<p>No candidates passed current filters.</p>"
+
+    body = "\n".join(
+        "<tr>"
+        f"<td>{html.escape(row['expiration'])}</td>"
+        f"<td>{html.escape(row['short_strike'])}</td>"
+        f"<td>{html.escape(row['long_strike'])}</td>"
+        f"<td>{html.escape(row['width'])}</td>"
+        f"<td>{html.escape(row['credit'])}</td>"
+        f"<td>{html.escape(row['credit_to_width'])}</td>"
+        f"<td>{html.escape(row['short_delta'])}</td>"
+        f"<td>{html.escape(row['short_volume'])}</td>"
+        f"<td>{html.escape(row['short_open_interest'])}</td>"
+        f"<td>{html.escape(row['long_open_interest'])}</td>"
+        "</tr>"
+        for row in rows
+    )
+
+    return f"""
+    <table>
+      <thead>
+        <tr>
+          <th>Expiration</th>
+          <th>Short Strike</th>
+          <th>Long Strike</th>
+          <th>Width</th>
+          <th>Credit</th>
+          <th>Credit/Width</th>
+          <th>Short Delta</th>
+          <th>Short Volume</th>
+          <th>Short Open Interest</th>
+          <th>Long Open Interest</th>
         </tr>
       </thead>
       <tbody>{body}</tbody>
