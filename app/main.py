@@ -12,6 +12,7 @@ from email.message import EmailMessage
 from typing import Optional
 from urllib.parse import quote
 
+import httpx
 from fastapi import FastAPI, Request, Form, Query, BackgroundTasks, Depends, HTTPException, Header
 from fastapi.responses import HTMLResponse, PlainTextResponse, FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
@@ -47,6 +48,7 @@ _login_attempts_lock = Lock()
 TEST_FACTOR_MIN = 1
 TEST_FACTOR_MAX = 12
 TEST_TOTAL_QUESTIONS = 10
+SCHWAB_QUOTE_TEST_ENDPOINT = "https://api.schwabapi.com/marketdata/v1/quotes"
 
 
 def _admin_session_serializer() -> Optional[URLSafeTimedSerializer]:
@@ -1003,16 +1005,80 @@ async def admin_schwab_status_typo(_: bool = Depends(require_admin)):
     return RedirectResponse(url="/admin/schwab-status", status_code=303)
 
 
-def _render_schwab_token_status() -> HTMLResponse:
-    db = SessionLocal()
-    try:
-        token = (
-            db.query(SchwabToken)
-            .order_by(SchwabToken.created_at.desc())
-            .first()
+@app.get("/admin/schwab-api-test", response_class=HTMLResponse)
+async def admin_schwab_api_test(_: bool = Depends(require_admin)):
+    token = _get_latest_schwab_token()
+
+    if not token:
+        return HTMLResponse(
+            """
+            <!doctype html>
+            <html lang="en">
+              <head><meta charset="utf-8"><title>Schwab API Test</title></head>
+              <body>
+                <h1>Schwab API Test</h1>
+                <p>No Schwab token stored.</p>
+              </body>
+            </html>
+            """
         )
-    finally:
-        db.close()
+
+    expires_at = _as_aware_utc(token.expires_at)
+    if expires_at is None or expires_at <= datetime.now(timezone.utc):
+        return HTMLResponse(
+            """
+            <!doctype html>
+            <html lang="en">
+              <head><meta charset="utf-8"><title>Schwab API Test</title></head>
+              <body>
+                <h1>Schwab API Test</h1>
+                <p>Token expired; refresh needed.</p>
+              </body>
+            </html>
+            """
+        )
+
+    status_text = "Request failed"
+    http_status = "Unavailable"
+    last_price = "Unavailable"
+
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            response = await client.get(
+                SCHWAB_QUOTE_TEST_ENDPOINT,
+                params={"symbols": "SPY", "fields": "quote"},
+                headers={
+                    "Accept": "application/json",
+                    "Authorization": f"Bearer {token.access_token}",
+                },
+            )
+        http_status = str(response.status_code)
+        if 200 <= response.status_code < 300:
+            status_text = "Request succeeded"
+            last_price = _extract_quote_last_price(response.json(), "SPY")
+    except Exception:
+        status_text = "Request failed"
+
+    return HTMLResponse(
+        f"""
+        <!doctype html>
+        <html lang="en">
+          <head><meta charset="utf-8"><title>Schwab API Test</title></head>
+          <body>
+            <h1>Schwab API Test</h1>
+            <p>Result: {status_text}</p>
+            <p>HTTP status: {http_status}</p>
+            <p>Endpoint used: {SCHWAB_QUOTE_TEST_ENDPOINT}</p>
+            <p>Symbol: SPY</p>
+            <p>Last price: {last_price}</p>
+          </body>
+        </html>
+        """
+    )
+
+
+def _render_schwab_token_status() -> HTMLResponse:
+    token = _get_latest_schwab_token()
 
     if not token:
         return HTMLResponse(
@@ -1050,12 +1116,44 @@ def _render_schwab_token_status() -> HTMLResponse:
     )
 
 
+def _get_latest_schwab_token() -> Optional[SchwabToken]:
+    db = SessionLocal()
+    try:
+        return (
+            db.query(SchwabToken)
+            .order_by(SchwabToken.created_at.desc())
+            .first()
+        )
+    finally:
+        db.close()
+
+
 def _as_aware_utc(value: datetime | None) -> datetime | None:
     if value is None:
         return None
     if value.tzinfo is None:
         return value.replace(tzinfo=timezone.utc)
     return value.astimezone(timezone.utc)
+
+
+def _extract_quote_last_price(payload: object, symbol: str) -> str:
+    if not isinstance(payload, dict):
+        return "Unavailable"
+
+    quote_data = payload.get(symbol) or payload.get(symbol.upper()) or payload.get(symbol.lower())
+    if not isinstance(quote_data, dict):
+        return "Unavailable"
+
+    quote = quote_data.get("quote")
+    if not isinstance(quote, dict):
+        return "Unavailable"
+
+    for key in ("lastPrice", "last", "mark"):
+        value = quote.get(key)
+        if value is not None:
+            return str(value)
+
+    return "Unavailable"
 
 
 @app.get("/admin/sessions/{device_id}/{client_session_id}", response_class=HTMLResponse)
