@@ -1224,6 +1224,8 @@ async def admin_schwab_spread_candidates(
         expiration=candidate_summary["expiration"],
         put_candidates=candidate_summary["put_candidates"],
         call_candidates=candidate_summary["call_candidates"],
+        diagnostics=candidate_summary["diagnostics"],
+        near_misses=candidate_summary["near_misses"],
     )
 
 
@@ -1353,6 +1355,8 @@ def _empty_spread_candidate_summary() -> dict:
         "expiration": "Unavailable",
         "put_candidates": [],
         "call_candidates": [],
+        "diagnostics": _empty_spread_diagnostics(),
+        "near_misses": [],
     }
 
 
@@ -1373,11 +1377,20 @@ def _find_spread_candidates(payload: object) -> dict:
 
     calls = _contracts_for_expiration(call_map, expiration_key)
     puts = _contracts_for_expiration(put_map, expiration_key)
+    expiration = _clean_expiration(expiration_key)
+    put_summary = _build_spread_side_summary("put", expiration, puts)
+    call_summary = _build_spread_side_summary("call", expiration, calls)
+    near_misses = put_summary["near_misses"] + call_summary["near_misses"]
 
     return {
-        "expiration": _clean_expiration(expiration_key),
-        "put_candidates": _find_put_spread_candidates(_clean_expiration(expiration_key), puts),
-        "call_candidates": _find_call_spread_candidates(_clean_expiration(expiration_key), calls),
+        "expiration": expiration,
+        "put_candidates": put_summary["candidates"],
+        "call_candidates": call_summary["candidates"],
+        "diagnostics": {
+            "put": put_summary["diagnostics"],
+            "call": call_summary["diagnostics"],
+        },
+        "near_misses": _sort_near_miss_rows(near_misses)[:10],
     }
 
 
@@ -1399,104 +1412,209 @@ def _contracts_for_expiration(expiration_map: dict, expiration_key: str) -> list
     return contracts
 
 
-def _find_put_spread_candidates(expiration: str, puts: list[dict]) -> list[dict[str, str]]:
-    candidates: list[dict[str, str]] = []
-    liquid_puts = [contract for contract in puts if _contract_is_liquid(contract)]
+def _empty_spread_diagnostics() -> dict:
+    return {
+        "put": _empty_spread_side_diagnostics(),
+        "call": _empty_spread_side_diagnostics(),
+    }
 
-    for short_leg in liquid_puts:
-        short_delta = _safe_float(short_leg.get("delta"))
+
+def _empty_spread_side_diagnostics() -> dict[str, int]:
+    return {
+        "contracts_in_delta_range": 0,
+        "removed_by_oi_filter": 0,
+        "removed_by_bid_ask_filter": 0,
+        "removed_by_credit_width_filter": 0,
+        "final_candidates": 0,
+    }
+
+
+def _build_spread_side_summary(side: str, expiration: str, contracts: list[dict]) -> dict:
+    diagnostics = _empty_spread_side_diagnostics()
+    all_candidates: list[dict[str, str]] = []
+    near_misses: list[dict] = []
+    target_shorts = [
+        contract for contract in contracts
+        if _short_leg_is_in_target_delta(side, contract)
+    ]
+    diagnostics["contracts_in_delta_range"] = len(target_shorts)
+
+    for short_leg in target_shorts:
         short_strike = _safe_float(short_leg.get("strikePrice"))
-        short_bid = _safe_float(short_leg.get("bid"))
-        if short_delta is None or short_strike is None or short_bid is None:
-            continue
-        if not (-0.15 <= short_delta <= -0.08):
+        if short_strike is None:
             continue
 
+        long_legs = _long_legs_for_side(side, contracts, short_strike)
+        for long_leg in long_legs:
+            evaluation = _evaluate_spread_candidate(side, expiration, short_leg, long_leg)
+            for failed_filter in evaluation["failed_filters"]:
+                if failed_filter == "OI":
+                    diagnostics["removed_by_oi_filter"] += 1
+                elif failed_filter == "Bid/ask spread":
+                    diagnostics["removed_by_bid_ask_filter"] += 1
+                elif failed_filter == "Credit/width":
+                    diagnostics["removed_by_credit_width_filter"] += 1
+
+            if evaluation["passed"]:
+                all_candidates.append(evaluation["row"])
+            else:
+                near_misses.append(evaluation)
+
+    diagnostics["final_candidates"] = len(all_candidates)
+
+    return {
+        "candidates": all_candidates[:10],
+        "diagnostics": diagnostics,
+        "near_misses": _format_near_misses(near_misses),
+    }
+
+
+def _short_leg_is_in_target_delta(side: str, contract: dict) -> bool:
+    delta = _safe_float(contract.get("delta"))
+    strike = _safe_float(contract.get("strikePrice"))
+    bid = _safe_float(contract.get("bid"))
+    if delta is None or strike is None or bid is None:
+        return False
+    if side == "put":
+        return -0.15 <= delta <= -0.08
+    return 0.08 <= delta <= 0.15
+
+
+def _long_legs_for_side(side: str, contracts: list[dict], short_strike: float) -> list[dict]:
+    if side == "put":
         long_legs = [
-            contract for contract in liquid_puts
+            contract for contract in contracts
             if (_safe_float(contract.get("strikePrice")) is not None
                 and _safe_float(contract.get("strikePrice")) < short_strike)
         ]
-        for long_leg in sorted(long_legs, key=lambda contract: _safe_float(contract.get("strikePrice")) or 0.0, reverse=True):
-            candidate = _build_spread_candidate(expiration, short_leg, long_leg)
-            if candidate:
-                candidates.append(candidate)
-                break
+        return sorted(
+            long_legs,
+            key=lambda contract: _safe_float(contract.get("strikePrice")) or 0.0,
+            reverse=True,
+        )
 
-        if len(candidates) >= 10:
-            break
-
-    return candidates
-
-
-def _find_call_spread_candidates(expiration: str, calls: list[dict]) -> list[dict[str, str]]:
-    candidates: list[dict[str, str]] = []
-    liquid_calls = [contract for contract in calls if _contract_is_liquid(contract)]
-
-    for short_leg in liquid_calls:
-        short_delta = _safe_float(short_leg.get("delta"))
-        short_strike = _safe_float(short_leg.get("strikePrice"))
-        short_bid = _safe_float(short_leg.get("bid"))
-        if short_delta is None or short_strike is None or short_bid is None:
-            continue
-        if not (0.08 <= short_delta <= 0.15):
-            continue
-
-        long_legs = [
-            contract for contract in liquid_calls
-            if (_safe_float(contract.get("strikePrice")) is not None
-                and _safe_float(contract.get("strikePrice")) > short_strike)
-        ]
-        for long_leg in sorted(long_legs, key=lambda contract: _safe_float(contract.get("strikePrice")) or 0.0):
-            candidate = _build_spread_candidate(expiration, short_leg, long_leg)
-            if candidate:
-                candidates.append(candidate)
-                break
-
-        if len(candidates) >= 10:
-            break
-
-    return candidates
+    long_legs = [
+        contract for contract in contracts
+        if (_safe_float(contract.get("strikePrice")) is not None
+            and _safe_float(contract.get("strikePrice")) > short_strike)
+    ]
+    return sorted(long_legs, key=lambda contract: _safe_float(contract.get("strikePrice")) or 0.0)
 
 
-def _build_spread_candidate(expiration: str, short_leg: dict, long_leg: dict) -> dict[str, str] | None:
+def _evaluate_spread_candidate(side: str, expiration: str, short_leg: dict, long_leg: dict) -> dict:
+    row = _build_spread_candidate_row(side, expiration, short_leg, long_leg)
+    failed_filters: list[str] = []
+    if not _legs_pass_open_interest(short_leg, long_leg):
+        failed_filters.append("OI")
+    if not _legs_pass_bid_ask_spread(short_leg, long_leg):
+        failed_filters.append("Bid/ask spread")
+    if not _spread_passes_credit_width(row):
+        failed_filters.append("Credit/width")
+
+    return {
+        "passed": not failed_filters,
+        "row": row,
+        "failed_filters": failed_filters,
+        "near_miss_score": _near_miss_score(row, failed_filters),
+    }
+
+
+def _build_spread_candidate_row(side: str, expiration: str, short_leg: dict, long_leg: dict) -> dict[str, str]:
     short_strike = _safe_float(short_leg.get("strikePrice"))
     long_strike = _safe_float(long_leg.get("strikePrice"))
     short_bid = _safe_float(short_leg.get("bid"))
     long_ask = _safe_float(long_leg.get("ask"))
-    if short_strike is None or long_strike is None or short_bid is None or long_ask is None:
-        return None
-
-    width = abs(short_strike - long_strike)
-    credit = short_bid - long_ask
-    if width <= 0 or credit <= 0:
-        return None
-
-    credit_to_width = credit / width
-    if credit_to_width < 0.35:
-        return None
+    width = abs(short_strike - long_strike) if short_strike is not None and long_strike is not None else 0.0
+    credit = short_bid - long_ask if short_bid is not None and long_ask is not None else 0.0
+    credit_to_width = credit / width if width > 0 else 0.0
 
     return {
+        "side": side.title(),
         "expiration": expiration,
-        "short_strike": f"{short_strike:0.2f}",
-        "long_strike": f"{long_strike:0.2f}",
-        "width": f"{width:0.2f}",
-        "credit": f"{credit:0.2f}",
-        "credit_to_width": f"{credit_to_width:0.2f}",
+        "short_strike": _format_decimal(short_strike),
+        "long_strike": _format_decimal(long_strike),
+        "width": _format_decimal(width),
+        "credit": _format_decimal(credit),
+        "credit_to_width": _format_decimal(credit_to_width),
         "short_delta": _format_option_value(short_leg.get("delta")),
         "short_volume": _format_option_value(short_leg.get("totalVolume", short_leg.get("volume"))),
         "short_open_interest": _format_option_value(short_leg.get("openInterest")),
         "long_open_interest": _format_option_value(long_leg.get("openInterest")),
+        "short_bid_ask_spread": _format_decimal(_bid_ask_spread(short_leg)),
+        "long_bid_ask_spread": _format_decimal(_bid_ask_spread(long_leg)),
     }
 
 
-def _contract_is_liquid(contract: dict) -> bool:
-    open_interest = _safe_float(contract.get("openInterest"))
+def _legs_pass_open_interest(short_leg: dict, long_leg: dict) -> bool:
+    short_oi = _safe_float(short_leg.get("openInterest"))
+    long_oi = _safe_float(long_leg.get("openInterest"))
+    return short_oi is not None and long_oi is not None and short_oi >= 500 and long_oi >= 500
+
+
+def _legs_pass_bid_ask_spread(short_leg: dict, long_leg: dict) -> bool:
+    short_spread = _bid_ask_spread(short_leg)
+    long_spread = _bid_ask_spread(long_leg)
+    return (
+        short_spread is not None
+        and long_spread is not None
+        and 0 <= short_spread <= 0.10
+        and 0 <= long_spread <= 0.10
+    )
+
+
+def _spread_passes_credit_width(row: dict[str, str]) -> bool:
+    credit = _safe_float(row.get("credit"))
+    width = _safe_float(row.get("width"))
+    credit_to_width = _safe_float(row.get("credit_to_width"))
+    return (
+        credit is not None
+        and width is not None
+        and credit_to_width is not None
+        and credit > 0
+        and width > 0
+        and credit_to_width >= 0.35
+    )
+
+
+def _bid_ask_spread(contract: dict) -> float | None:
     bid = _safe_float(contract.get("bid"))
     ask = _safe_float(contract.get("ask"))
-    if open_interest is None or bid is None or ask is None:
-        return False
-    return open_interest >= 500 and 0 <= ask - bid <= 0.10
+    if bid is None or ask is None:
+        return None
+    return ask - bid
+
+
+def _near_miss_score(row: dict[str, str], failed_filters: list[str]) -> tuple:
+    credit_to_width = _safe_float(row.get("credit_to_width")) or 0.0
+    short_oi = _safe_float(row.get("short_open_interest")) or 0.0
+    long_oi = _safe_float(row.get("long_open_interest")) or 0.0
+    short_spread = _safe_float(row.get("short_bid_ask_spread")) or 999.0
+    long_spread = _safe_float(row.get("long_bid_ask_spread")) or 999.0
+    oi_gap = max(0.0, 500 - short_oi) + max(0.0, 500 - long_oi)
+    spread_gap = max(0.0, short_spread - 0.10) + max(0.0, long_spread - 0.10)
+    credit_gap = max(0.0, 0.35 - credit_to_width)
+    return (len(failed_filters), credit_gap, oi_gap, spread_gap)
+
+
+def _format_near_misses(evaluations: list[dict]) -> list[dict[str, str]]:
+    rows: list[dict[str, str]] = []
+    for evaluation in sorted(evaluations, key=lambda item: item["near_miss_score"]):
+        row = dict(evaluation["row"])
+        row["failed_filters"] = ", ".join(evaluation["failed_filters"])
+        rows.append(row)
+        if len(rows) >= 10:
+            break
+    return rows
+
+
+def _sort_near_miss_rows(near_misses: list[dict[str, str]]) -> list[dict[str, str]]:
+    return sorted(
+        near_misses,
+        key=lambda row: (
+            len(row["failed_filters"].split(", ")),
+            max(0.0, 0.35 - (_safe_float(row.get("credit_to_width")) or 0.0)),
+        ),
+    )[:10]
 
 
 def _safe_float(value: object) -> float | None:
@@ -1506,6 +1624,13 @@ def _safe_float(value: object) -> float | None:
         return float(value)
     except (TypeError, ValueError):
         return None
+
+
+def _format_decimal(value: object) -> str:
+    number = _safe_float(value)
+    if number is None:
+        return "-"
+    return f"{number:0.2f}"
 
 
 def _first_expiration_key(call_map: dict, put_map: dict) -> str | None:
@@ -1638,9 +1763,13 @@ def _render_schwab_spread_candidates_page(
     expiration: str = "Unavailable",
     put_candidates: list[dict[str, str]] | None = None,
     call_candidates: list[dict[str, str]] | None = None,
+    diagnostics: dict | None = None,
+    near_misses: list[dict[str, str]] | None = None,
 ) -> HTMLResponse:
     put_candidates = put_candidates or []
     call_candidates = call_candidates or []
+    diagnostics = diagnostics or _empty_spread_diagnostics()
+    near_misses = near_misses or []
     safe_symbol = html.escape(symbol)
     safe_message = html.escape(message)
     safe_request_url = html.escape(request_url or _build_schwab_options_request_url(symbol, strike_count="20"))
@@ -1674,10 +1803,14 @@ def _render_schwab_spread_candidates_page(
             <p>Symbol: {safe_symbol}</p>
             <p>Nearest expiration used: {html.escape(expiration)}</p>
             {no_candidates_message}
+            <h2>Filter Diagnostics</h2>
+            {_render_spread_diagnostics(diagnostics)}
             <h2>Put Spread Candidates</h2>
             {_render_spread_candidate_rows(put_candidates)}
             <h2>Call Spread Candidates</h2>
             {_render_spread_candidate_rows(call_candidates)}
+            <h2>Near Misses</h2>
+            {_render_near_miss_rows(near_misses)}
           </body>
         </html>
         """
@@ -1753,6 +1886,89 @@ def _render_spread_candidate_rows(rows: list[dict[str, str]]) -> str:
           <th>Short Volume</th>
           <th>Short Open Interest</th>
           <th>Long Open Interest</th>
+        </tr>
+      </thead>
+      <tbody>{body}</tbody>
+    </table>
+    """
+
+
+def _render_spread_diagnostics(diagnostics: dict) -> str:
+    rows = []
+    labels = {
+        "put": "Put",
+        "call": "Call",
+    }
+    for key, label in labels.items():
+        side = diagnostics.get(key, _empty_spread_side_diagnostics())
+        rows.append(
+            "<tr>"
+            f"<td>{label}</td>"
+            f"<td>{side.get('contracts_in_delta_range', 0)}</td>"
+            f"<td>{side.get('removed_by_oi_filter', 0)}</td>"
+            f"<td>{side.get('removed_by_bid_ask_filter', 0)}</td>"
+            f"<td>{side.get('removed_by_credit_width_filter', 0)}</td>"
+            f"<td>{side.get('final_candidates', 0)}</td>"
+            "</tr>"
+        )
+
+    return f"""
+    <table>
+      <thead>
+        <tr>
+          <th>Side</th>
+          <th>Contracts in Target Delta Range</th>
+          <th>Removed by OI Filter</th>
+          <th>Removed by Bid/Ask Spread Filter</th>
+          <th>Removed by Credit/Width Filter</th>
+          <th>Final Candidates</th>
+        </tr>
+      </thead>
+      <tbody>{"".join(rows)}</tbody>
+    </table>
+    """
+
+
+def _render_near_miss_rows(rows: list[dict[str, str]]) -> str:
+    if not rows:
+        return "<p>No near misses available.</p>"
+
+    body = "\n".join(
+        "<tr>"
+        f"<td>{html.escape(row['side'])}</td>"
+        f"<td>{html.escape(row['expiration'])}</td>"
+        f"<td>{html.escape(row['short_strike'])}</td>"
+        f"<td>{html.escape(row['long_strike'])}</td>"
+        f"<td>{html.escape(row['width'])}</td>"
+        f"<td>{html.escape(row['credit'])}</td>"
+        f"<td>{html.escape(row['credit_to_width'])}</td>"
+        f"<td>{html.escape(row['short_delta'])}</td>"
+        f"<td>{html.escape(row['short_open_interest'])}</td>"
+        f"<td>{html.escape(row['long_open_interest'])}</td>"
+        f"<td>{html.escape(row['short_bid_ask_spread'])}</td>"
+        f"<td>{html.escape(row['long_bid_ask_spread'])}</td>"
+        f"<td>{html.escape(row['failed_filters'])}</td>"
+        "</tr>"
+        for row in rows
+    )
+
+    return f"""
+    <table>
+      <thead>
+        <tr>
+          <th>Side</th>
+          <th>Expiration</th>
+          <th>Short Strike</th>
+          <th>Long Strike</th>
+          <th>Width</th>
+          <th>Credit</th>
+          <th>Credit/Width</th>
+          <th>Short Delta</th>
+          <th>Short OI</th>
+          <th>Long OI</th>
+          <th>Short Bid/Ask Spread</th>
+          <th>Long Bid/Ask Spread</th>
+          <th>Failed Filters</th>
         </tr>
       </thead>
       <tbody>{body}</tbody>
