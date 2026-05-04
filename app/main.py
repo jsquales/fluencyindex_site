@@ -1,4 +1,5 @@
 from pathlib import Path
+import html
 import os
 import random
 import re
@@ -50,6 +51,7 @@ TEST_FACTOR_MIN = 1
 TEST_FACTOR_MAX = 12
 TEST_TOTAL_QUESTIONS = 10
 SCHWAB_QUOTE_TEST_ENDPOINT = "https://api.schwabapi.com/marketdata/v1/quotes"
+SCHWAB_OPTIONS_TEST_ENDPOINT = "https://api.schwabapi.com/marketdata/v1/chains"
 
 
 def _admin_session_serializer() -> Optional[URLSafeTimedSerializer]:
@@ -1089,6 +1091,72 @@ async def admin_schwab_api_test(_: bool = Depends(require_admin)):
     )
 
 
+@app.get("/admin/schwab-options-test", response_class=HTMLResponse)
+async def admin_schwab_options_test(
+    symbol: str = Query(default="SPY", min_length=1, max_length=16),
+    _: bool = Depends(require_admin),
+):
+    normalized_symbol = _normalize_market_symbol(symbol)
+    refresh_result = await refresh_access_token_if_needed()
+    token = refresh_result.token
+
+    if not token:
+        return _render_schwab_options_test_page(
+            symbol=normalized_symbol,
+            api_request_status="skipped",
+            http_status="Unavailable",
+            message="No Schwab token stored.",
+            refresh_attempted=refresh_result.refresh_attempted,
+            refresh_succeeded=refresh_result.refresh_succeeded,
+        )
+
+    expires_at = _as_aware_utc(token.expires_at)
+    if expires_at is None or expires_at <= datetime.now(timezone.utc):
+        return _render_schwab_options_test_page(
+            symbol=normalized_symbol,
+            api_request_status="skipped",
+            http_status="Unavailable",
+            message="Token expired; refresh needed.",
+            refresh_attempted=refresh_result.refresh_attempted,
+            refresh_succeeded=refresh_result.refresh_succeeded,
+        )
+
+    api_request_status = "failed"
+    http_status = "Unavailable"
+    chain_summary = _empty_options_summary()
+
+    try:
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            response = await client.get(
+                SCHWAB_OPTIONS_TEST_ENDPOINT,
+                params={"symbol": normalized_symbol, "contractType": "ALL"},
+                headers={
+                    "Accept": "application/json",
+                    "Authorization": f"Bearer {token.access_token}",
+                },
+            )
+        http_status = str(response.status_code)
+        if 200 <= response.status_code < 300:
+            api_request_status = "succeeded"
+            chain_summary = _summarize_option_chain(response.json())
+    except Exception:
+        api_request_status = "failed"
+
+    return _render_schwab_options_test_page(
+        symbol=normalized_symbol,
+        api_request_status=api_request_status,
+        http_status=http_status,
+        message="",
+        refresh_attempted=refresh_result.refresh_attempted,
+        refresh_succeeded=refresh_result.refresh_succeeded,
+        call_expiration_count=chain_summary["call_expiration_count"],
+        put_expiration_count=chain_summary["put_expiration_count"],
+        first_expiration=chain_summary["first_expiration"],
+        call_rows=chain_summary["call_rows"],
+        put_rows=chain_summary["put_rows"],
+    )
+
+
 def _render_schwab_token_status() -> HTMLResponse:
     token = get_latest_schwab_token()
 
@@ -1154,6 +1222,194 @@ def _extract_quote_last_price(payload: object, symbol: str) -> str:
             return str(value)
 
     return "Unavailable"
+
+
+def _normalize_market_symbol(symbol: str) -> str:
+    cleaned = symbol.strip().upper()
+    return cleaned or "SPY"
+
+
+def _empty_options_summary() -> dict:
+    return {
+        "call_expiration_count": 0,
+        "put_expiration_count": 0,
+        "first_expiration": "Unavailable",
+        "call_rows": [],
+        "put_rows": [],
+    }
+
+
+def _summarize_option_chain(payload: object) -> dict:
+    if not isinstance(payload, dict):
+        return _empty_options_summary()
+
+    call_map = payload.get("callExpDateMap")
+    put_map = payload.get("putExpDateMap")
+    if not isinstance(call_map, dict):
+        call_map = {}
+    if not isinstance(put_map, dict):
+        put_map = {}
+
+    first_expiration_key = _first_expiration_key(call_map, put_map)
+    first_expiration = _clean_expiration(first_expiration_key) if first_expiration_key else "Unavailable"
+
+    return {
+        "call_expiration_count": len(call_map),
+        "put_expiration_count": len(put_map),
+        "first_expiration": first_expiration,
+        "call_rows": _sample_option_rows(call_map, first_expiration_key),
+        "put_rows": _sample_option_rows(put_map, first_expiration_key),
+    }
+
+
+def _first_expiration_key(call_map: dict, put_map: dict) -> str | None:
+    keys = list(call_map.keys()) + list(put_map.keys())
+    if not keys:
+        return None
+    return sorted(str(key) for key in keys)[0]
+
+
+def _sample_option_rows(expiration_map: dict, expiration_key: str | None) -> list[dict[str, str]]:
+    if not expiration_key or expiration_key not in expiration_map:
+        return []
+
+    strike_map = expiration_map.get(expiration_key)
+    if not isinstance(strike_map, dict):
+        return []
+
+    rows: list[dict[str, str]] = []
+    for strike_key in sorted(strike_map.keys(), key=_strike_sort_key):
+        contracts = strike_map.get(strike_key)
+        if not isinstance(contracts, list) or not contracts:
+            continue
+
+        contract = contracts[0]
+        if not isinstance(contract, dict):
+            continue
+
+        rows.append(
+            {
+                "expiration": _clean_expiration(expiration_key),
+                "strike": _format_option_value(contract.get("strikePrice", strike_key)),
+                "bid": _format_option_value(contract.get("bid")),
+                "ask": _format_option_value(contract.get("ask")),
+                "delta": _format_option_value(contract.get("delta")),
+                "volume": _format_option_value(contract.get("totalVolume", contract.get("volume"))),
+                "openInterest": _format_option_value(contract.get("openInterest")),
+            }
+        )
+
+        if len(rows) >= 5:
+            break
+
+    return rows
+
+
+def _strike_sort_key(value: object) -> float:
+    try:
+        return float(str(value))
+    except ValueError:
+        return 0.0
+
+
+def _clean_expiration(expiration_key: str) -> str:
+    return str(expiration_key).split(":", 1)[0]
+
+
+def _format_option_value(value: object) -> str:
+    if value is None:
+        return "-"
+    return str(value)
+
+
+def _render_schwab_options_test_page(
+    *,
+    symbol: str,
+    api_request_status: str,
+    http_status: str,
+    message: str,
+    refresh_attempted: bool,
+    refresh_succeeded: bool,
+    call_expiration_count: int = 0,
+    put_expiration_count: int = 0,
+    first_expiration: str = "Unavailable",
+    call_rows: list[dict[str, str]] | None = None,
+    put_rows: list[dict[str, str]] | None = None,
+) -> HTMLResponse:
+    call_rows = call_rows or []
+    put_rows = put_rows or []
+    safe_symbol = html.escape(symbol)
+    safe_message = html.escape(message)
+
+    return HTMLResponse(
+        f"""
+        <!doctype html>
+        <html lang="en">
+          <head>
+            <meta charset="utf-8">
+            <title>Schwab Options Chain Test</title>
+            <style>
+              body {{ font-family: Arial, sans-serif; margin: 32px; }}
+              table {{ border-collapse: collapse; margin: 12px 0 24px; min-width: 720px; }}
+              th, td {{ border: 1px solid #d0d7de; padding: 6px 8px; text-align: right; }}
+              th:first-child, td:first-child {{ text-align: left; }}
+            </style>
+          </head>
+          <body>
+            <h1>Schwab Options Chain Test</h1>
+            {f"<p>{safe_message}</p>" if safe_message else ""}
+            <p>Token refresh attempted: {str(refresh_attempted).lower()}</p>
+            <p>Token refresh succeeded: {str(refresh_succeeded).lower()}</p>
+            <p>API request: {html.escape(api_request_status)}</p>
+            <p>HTTP status: {html.escape(http_status)}</p>
+            <p>Endpoint used: {SCHWAB_OPTIONS_TEST_ENDPOINT}</p>
+            <p>Symbol: {safe_symbol}</p>
+            <p>Call expirations returned: {call_expiration_count}</p>
+            <p>Put expirations returned: {put_expiration_count}</p>
+            <p>First expiration date found: {html.escape(first_expiration)}</p>
+            <h2>Sample Calls</h2>
+            {_render_option_rows(call_rows)}
+            <h2>Sample Puts</h2>
+            {_render_option_rows(put_rows)}
+          </body>
+        </html>
+        """
+    )
+
+
+def _render_option_rows(rows: list[dict[str, str]]) -> str:
+    if not rows:
+        return "<p>No contracts available.</p>"
+
+    body = "\n".join(
+        "<tr>"
+        f"<td>{html.escape(row['expiration'])}</td>"
+        f"<td>{html.escape(row['strike'])}</td>"
+        f"<td>{html.escape(row['bid'])}</td>"
+        f"<td>{html.escape(row['ask'])}</td>"
+        f"<td>{html.escape(row['delta'])}</td>"
+        f"<td>{html.escape(row['volume'])}</td>"
+        f"<td>{html.escape(row['openInterest'])}</td>"
+        "</tr>"
+        for row in rows
+    )
+
+    return f"""
+    <table>
+      <thead>
+        <tr>
+          <th>Expiration</th>
+          <th>Strike</th>
+          <th>Bid</th>
+          <th>Ask</th>
+          <th>Delta</th>
+          <th>Volume</th>
+          <th>Open Interest</th>
+        </tr>
+      </thead>
+      <tbody>{body}</tbody>
+    </table>
+    """
 
 
 @app.get("/admin/sessions/{device_id}/{client_session_id}", response_class=HTMLResponse)
