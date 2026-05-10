@@ -28,6 +28,7 @@ DEFAULT_WORKBOOK = ROOT_DIR / "24 math game.xlsx"
 SHEET_VARIANTS = {
     "Single Digits": "single_digits",
     "Integers": "integers",
+    "Fractions&Decimals": "fractions_decimals",
 }
 REQUIRED_COLUMNS = {
     "style": "Style",

@@ -32,6 +32,7 @@ def get_game24_puzzle_response(db: Session, puzzle_id: int) -> Game24PuzzleRespo
 VARIANT_OPTIONS = [
     Game24VariantOption(value="single_digits", label="Single Digits"),
     Game24VariantOption(value="integers", label="Integers"),
+    Game24VariantOption(value="fractions_decimals", label="Fractions & Decimals"),
 ]
 
 
