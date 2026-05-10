@@ -461,7 +461,7 @@ body {
   border-radius: 8px;
   padding: 0.45rem 0.55rem;
   font: inherit;
-  background: #f8fafc;
+  background: #eef2ff;
 }
 
 .clear-row-button,
@@ -469,7 +469,7 @@ body {
   min-height: 36px;
   border: 1px solid var(--border);
   border-radius: 8px;
-  background: #f8fafc;
+  background: #eef2ff;
   color: var(--text-muted);
   cursor: pointer;
   font: inherit;
@@ -482,7 +482,7 @@ body {
 .clear-all-button:hover {
   border-color: #cbd5e1;
   color: var(--text-main);
-  background: #eef2ff;
+  background: #e0e7ff;
 }
 
 .clear-all-spacer {
