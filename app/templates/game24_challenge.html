@@ -109,6 +109,34 @@
     return `/api/v1/game24/random-puzzle${query ? `?${query}` : ""}`;
   }
 
+  function escapeHtml(value) {
+    return String(value)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#039;");
+  }
+
+  function renderCardNumber(number) {
+    const raw = String(number);
+    const fractionMatch = raw.match(/^(-?)(\d+)\/(\d+)$/);
+    if (!fractionMatch) {
+      return escapeHtml(raw);
+    }
+
+    const [, sign, numerator, denominator] = fractionMatch;
+    return `
+      <span class="stacked-fraction" aria-label="${escapeHtml(raw)}">
+        ${sign ? '<span class="fraction-sign">-</span>' : ""}
+        <span class="fraction-body" aria-hidden="true">
+          <span class="fraction-numerator">${escapeHtml(numerator)}</span>
+          <span class="fraction-denominator">${escapeHtml(denominator)}</span>
+        </span>
+      </span>
+    `;
+  }
+
   function rowPayload(rowNumber) {
     return {
       left: document.getElementById(`left-${rowNumber}`).value,
@@ -143,7 +171,7 @@
       startedAt = new Date();
       puzzleStatus.textContent = `Puzzle #${currentPuzzle.id} - ${currentPuzzle.variant} - difficulty ${currentPuzzle.difficulty}`;
       numberCards.innerHTML = currentPuzzle.numbers
-        .map((number) => `<div class="number-card">${number}</div>`)
+        .map((number) => `<div class="number-card">${renderCardNumber(number)}</div>`)
         .join("");
     } catch (error) {
       currentPuzzle = null;
