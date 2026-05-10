@@ -442,7 +442,7 @@ body {
 
 .challenge-row {
   display: grid;
-  grid-template-columns: 64px 96px 64px 96px 24px 96px;
+  grid-template-columns: 86px 64px 96px 64px 96px 24px 96px 78px;
   gap: 0.5rem;
   align-items: center;
 }
@@ -462,6 +462,31 @@ body {
   padding: 0.45rem 0.55rem;
   font: inherit;
   background: #ffffff;
+}
+
+.clear-row-button,
+.clear-all-button {
+  min-height: 36px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #f8fafc;
+  color: var(--text-muted);
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.82rem;
+  font-weight: 600;
+  padding: 0.35rem 0.45rem;
+}
+
+.clear-row-button:hover,
+.clear-all-button:hover {
+  border-color: #cbd5e1;
+  color: var(--text-main);
+  background: #eef2ff;
+}
+
+.clear-all-spacer {
+  min-width: 1px;
 }
 
 .challenge-row input:focus,
@@ -538,6 +563,12 @@ body {
 
   .challenge-row {
     grid-template-columns: 1fr 64px 1fr;
+  }
+
+  .challenge-row .clear-row-button,
+  .challenge-row .clear-all-button,
+  .challenge-row .clear-all-spacer {
+    grid-column: 1 / -1;
   }
 
   .challenge-row .row-label,

@@ -42,6 +42,7 @@
     <form id="challenge-form" class="challenge-form" autocomplete="off">
       {% for row_number in [1, 2, 3] %}
       <div class="challenge-row">
+        <button type="button" class="clear-row-button" data-row="{{ row_number }}">Clear Row</button>
         <span class="row-label">Row {{ row_number }}</span>
         <input id="left-{{ row_number }}" name="left-{{ row_number }}" type="text" inputmode="decimal" autocomplete="off" autocapitalize="off" spellcheck="false" aria-label="Row {{ row_number }} left input">
         <select id="op-{{ row_number }}" name="op-{{ row_number }}" aria-label="Row {{ row_number }} operator">
@@ -53,6 +54,11 @@
         <input id="right-{{ row_number }}" name="right-{{ row_number }}" type="text" inputmode="decimal" autocomplete="off" autocapitalize="off" spellcheck="false" aria-label="Row {{ row_number }} right input">
         <span class="equals-sign">=</span>
         <input id="result-{{ row_number }}" name="result-{{ row_number }}" type="text" inputmode="decimal" autocomplete="off" autocapitalize="off" spellcheck="false" aria-label="Row {{ row_number }} result input" {% if row_number == 3 %}value="24"{% endif %}>
+        {% if row_number == 2 %}
+        <button type="button" id="clear-all-button" class="clear-all-button">Clear All</button>
+        {% else %}
+        <span class="clear-all-spacer"></span>
+        {% endif %}
       </div>
       {% endfor %}
 
@@ -77,6 +83,7 @@
   const nextPuzzleActions = document.getElementById("next-puzzle-actions");
   const deckFilter = document.getElementById("deck-filter");
   const difficultyFilter = document.getElementById("difficulty-filter");
+  const clearAllButton = document.getElementById("clear-all-button");
 
   let currentPuzzle = null;
   let startedAt = null;
@@ -146,12 +153,16 @@
     };
   }
 
+  function clearRow(rowNumber) {
+    document.getElementById(`left-${rowNumber}`).value = "";
+    document.getElementById(`op-${rowNumber}`).value = "+";
+    document.getElementById(`right-${rowNumber}`).value = "";
+    document.getElementById(`result-${rowNumber}`).value = rowNumber === 3 ? "24" : "";
+  }
+
   function resetRows() {
     for (const rowNumber of [1, 2, 3]) {
-      document.getElementById(`left-${rowNumber}`).value = "";
-      document.getElementById(`op-${rowNumber}`).value = "+";
-      document.getElementById(`right-${rowNumber}`).value = "";
-      document.getElementById(`result-${rowNumber}`).value = rowNumber === 3 ? "24" : "";
+      clearRow(rowNumber);
     }
   }
 
@@ -221,6 +232,10 @@
   newPuzzleButton.addEventListener("click", loadPuzzle);
   deckFilter.addEventListener("change", loadPuzzle);
   difficultyFilter.addEventListener("change", loadPuzzle);
+  clearAllButton.addEventListener("click", resetRows);
+  document.querySelectorAll(".clear-row-button").forEach((button) => {
+    button.addEventListener("click", () => clearRow(Number(button.dataset.row)));
+  });
 
   loadPuzzle();
 </script>
