@@ -15,7 +15,7 @@ from urllib.parse import quote
 
 import httpx
 from fastapi import FastAPI, Request, Form, Query, BackgroundTasks, Depends, HTTPException, Header
-from fastapi.responses import HTMLResponse, PlainTextResponse, FileResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, PlainTextResponse, FileResponse, RedirectResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from itsdangerous import BadSignature, URLSafeTimedSerializer
@@ -90,6 +90,13 @@ def require_admin(request: Request) -> bool:
 
 def require_ingest_api_key(x_api_key: Optional[str] = Header(default=None)) -> bool:
     expected = os.getenv("INGEST_API_KEY")
+    if not expected or not x_api_key or not secrets.compare_digest(x_api_key, expected):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    return True
+
+
+def require_schwab_desktop_collector_key(x_api_key: Optional[str] = Header(default=None)) -> bool:
+    expected = os.getenv("SCHWAB_DESKTOP_COLLECTOR_KEY")
     if not expected or not x_api_key or not secrets.compare_digest(x_api_key, expected):
         raise HTTPException(status_code=401, detail="Unauthorized")
     return True
@@ -1160,6 +1167,94 @@ async def admin_schwab_options_test(
     )
 
 
+@app.get("/api/schwab/option-chain-snapshot")
+async def schwab_option_chain_snapshot_api(
+    symbol: str = Query(default="SPY", min_length=1, max_length=16),
+    _: bool = Depends(require_schwab_desktop_collector_key),
+):
+    normalized_symbol = _normalize_market_symbol(symbol)
+    refresh_result = await refresh_access_token_if_needed()
+    token = refresh_result.token
+
+    if not token:
+        return JSONResponse(
+            status_code=503,
+            content={
+                "success": False,
+                "message": "No Schwab token stored on backend.",
+                "http_status": None,
+            },
+        )
+
+    expires_at = _as_aware_utc(token.expires_at)
+    if expires_at is None or expires_at <= datetime.now(timezone.utc):
+        return JSONResponse(
+            status_code=503,
+            content={
+                "success": False,
+                "message": "Backend Schwab token expired and refresh did not produce a usable token.",
+                "http_status": None,
+                "refresh_attempted": refresh_result.refresh_attempted,
+                "refresh_succeeded": refresh_result.refresh_succeeded,
+            },
+        )
+
+    request_params = _build_schwab_options_request_params(
+        normalized_symbol,
+        strike_count="80",
+        include_underlying_quote="true",
+    )
+
+    try:
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            response = await client.get(
+                SCHWAB_OPTIONS_TEST_ENDPOINT,
+                params=request_params,
+                headers={
+                    "Accept": "application/json",
+                    "Authorization": f"Bearer {token.access_token}",
+                },
+            )
+        response_payload = response.json()
+    except ValueError:
+        return JSONResponse(
+            status_code=502,
+            content={
+                "success": False,
+                "message": "Schwab returned a non-JSON response.",
+                "http_status": response.status_code if "response" in locals() else None,
+                "endpoint_url": SCHWAB_OPTIONS_TEST_ENDPOINT,
+                "request_parameters": request_params,
+            },
+        )
+    except Exception:
+        return JSONResponse(
+            status_code=502,
+            content={
+                "success": False,
+                "message": "Backend Schwab option-chain request failed.",
+                "http_status": None,
+                "endpoint_url": SCHWAB_OPTIONS_TEST_ENDPOINT,
+                "request_parameters": request_params,
+            },
+        )
+
+    return JSONResponse(
+        status_code=200 if 200 <= response.status_code < 300 else 502,
+        content={
+            "success": 200 <= response.status_code < 300,
+            "message": "" if 200 <= response.status_code < 300 else "Schwab option-chain request failed.",
+            "symbol": normalized_symbol,
+            "endpoint_url": SCHWAB_OPTIONS_TEST_ENDPOINT,
+            "request_parameters": request_params,
+            "http_status": response.status_code,
+            "refresh_attempted": refresh_result.refresh_attempted,
+            "refresh_succeeded": refresh_result.refresh_succeeded,
+            "data": response_payload if 200 <= response.status_code < 300 else None,
+        },
+    )
+
+
 @app.get("/admin/schwab-spread-candidates", response_class=HTMLResponse)
 async def admin_schwab_spread_candidates(
     symbol: str = Query(default="SPY", min_length=1, max_length=16),
@@ -1311,13 +1406,17 @@ def _empty_options_summary() -> dict:
     }
 
 
-def _build_schwab_options_request_params(symbol: str, strike_count: str = "10") -> dict[str, str]:
+def _build_schwab_options_request_params(
+    symbol: str,
+    strike_count: str = "10",
+    include_underlying_quote: str = "false",
+) -> dict[str, str]:
     return {
         "symbol": symbol,
         "contractType": "ALL",
         "strategy": "SINGLE",
         "strikeCount": strike_count,
-        "includeUnderlyingQuote": "false",
+        "includeUnderlyingQuote": include_underlying_quote,
     }
 
 
